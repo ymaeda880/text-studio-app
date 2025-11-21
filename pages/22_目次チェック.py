@@ -16,8 +16,9 @@ from lib.toc_segments import (
 )
 
 st.set_page_config(page_title="📄 目次チェック（ローカル照合）", page_icon="📄", layout="wide")
-st.title("📄 目次チェック（ローカル照合 / 行スキャン）")
-st.caption("GPT を使わず、目次候補（タイトル）を本文に対して **行ごとに順番に** 照合します。")
+st.title("📄 目次チェック")
+st.caption("目次候補（目次タイトルと頁）を本文に対して **行ごとに順番に** 照合します。")
+st.caption("AIは使用していません．安心してpdfを丸ごとアップロードしてください．")
 
 with st.expander("ℹ️ このツールが拾う目次と頁番号のルール（クリックで展開）", expanded=False):
     st.markdown("""

@@ -23,7 +23,11 @@ from lib.toc_segments import (
 # ページ設定 & メインUI
 # =========================
 st.set_page_config(page_title="🖼️ 図表 抽出（行頭/助詞/句点ルール + 頁ラベル）", page_icon="🖼️", layout="wide")
-st.title("🖼️ 図表 抽出 — タイトル/参照（行頭・直後助詞・句点ルール）＋ 頁ラベル併記")
+st.title("🖼️ 図表の参照照合チェック")
+st.caption("図表番号と本文の参照に対して照合してチェックを行います。"
+           "（１）図表があるのに本文で参照されていないもの，（２）本文で参照されているのに図表の本体がないもの,"
+           "（３）図表番号が重複しているものをチェックします．")
+st.caption("AIは使用していません．安心してpdfを丸ごとアップロードしてください．")
 
 uploaded = st.file_uploader("PDF をアップロード", type=["pdf"])
 run = st.button("▶ 解析を実行", type="primary", use_container_width=True)

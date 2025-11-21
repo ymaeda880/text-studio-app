@@ -23,56 +23,18 @@ from lib.text_loaders import (
     load_text_generic, extract_pdf_text, load_text_from_paste
 )
 
-# ------------------------------------------------------------
-# モード定義（解析のみ使用）
-# ------------------------------------------------------------
-# "「原文」 は該当箇所の短い抜粋（最大20字）に留めてください。"
-MODE_DEFS: Dict[str, Dict[str, str]] = {
-    "厳格校正": {
-        "desc": "助詞・主述一致・冗長/重複・語順・誤字脱字・用語誤用・文体不統一まで広く対象。意味は変えず最適化のための方針を抽出。",
-        "analyze_inst": (
-            "あなたは厳密な日本語校正リーダーです。以下の番号付きテキストを読み、"
-            "『何をどのように直すべきか』を、具体的な理由とともに一覧化してください。\n"
-            "行頭の [page:line] を必ず参照して位置を示し、過度な意訳は避けてください。\n"
-            "助詞（てにおは）、主述一致、冗長、重複、語順、誤字脱字、用語誤用、文体の不統一に特に注意。\n"
-        ),
-    },
-    "通常校正": {
-        "desc": "助詞・主述一致・語順・誤字脱字・文体不統一などを対象。意味は変えず最適化のための方針を抽出。",
-        "analyze_inst": (
-            "あなたは通常の日本語校正リーダーです。以下の番号付きテキストを読み、"
-            "『何をどのように直すべきか』を、理由とともに一覧化してください。\n"
-            "行頭の [page:line] を必ず参照して位置を示し、過度な意訳は避けてください。\n"
-        ),
-    },
-    "簡易校正（ミス最小修正）": {
-        "desc": "明白なミスのみ（てにおは・助詞・誤字脱字・明確な変換ミス）に絞った方針を抽出。",
-        "analyze_inst": (
-            "あなたは日本語の軽微校正リーダーです。以下の番号付きテキストから、"
-            "『明白なミス（てにおは・助詞の誤り、誤字脱字、明確な変換ミス）』のみを抽出してください。"
-            "語順変更やスタイル統一などの裁量的変更は提案しないでください。"
-            "「理由」 は“明白な誤り”である根拠を簡潔に。"
-        ),
-    },
-}
-
-# ------------------------------------------------------------
-# 解析時に常に付与する共通プロンプト
-# ------------------------------------------------------------
-COMMON_PROMPT = (
-    "【共通方針（厳守）】\n"
-    "それぞれの校正の必要性を0から10までの数字で表して明記してください：\n"
-    "- 必要性が高い構成には大きい数字をつけてください．\n"
-    "- 誤字．脱字など，校正が必ず必要なものを10と評価してください．\n"
-    "- 校正する必要の無いものを0と評価してください．\n"
-    "- 出力は **Markdownの表** で、列は次の順：頁 | 行 | 重要度 | 原文 | 修正案 | 理由"
-    "「原文」及び「修正案」は，修正に関連する箇所を，修正理由が分かるように抜粋してください．"
+from lib.proofreading.prompts import (
+    MODE_DEFS,
+    COMMON_PROMPT,
+    get_analyze_instruction,
+    build_system_prompt,
 )
 
 # ------------------------------------------------------------
 # UI定数
 # ------------------------------------------------------------
 st.set_page_config(page_title="Text Studio / 解析（校正方針）", page_icon="📝", layout="wide")
+
 MODEL_OPTIONS = ["gpt-5-mini", "gpt-5-nano"]
 DEFAULT_MODEL = "gpt-5-mini"
 DEFAULT_MODE = "通常校正"
@@ -110,33 +72,31 @@ def render_preview_with_numbers(lines: List[str], lines_per_page: int) -> str:
 def openai_client() -> OpenAI:
     return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ------------------------------------------------------------
-# プロンプト組み立て & 設定UI
-# ------------------------------------------------------------
-def get_analyze_instruction(mode: str) -> str:
-    return MODE_DEFS.get(mode, MODE_DEFS["厳格校正"])["analyze_inst"]
 
-def build_sys_inst(base: str, extra: str) -> str:
-    parts = [base.strip()]
-    if (extra or "").strip():
-        parts.append("【追加指示（厳守）】\n" + extra.strip())
-    if (globals().get("COMMON_PROMPT") or "").strip():
-        parts.append(COMMON_PROMPT.strip())
-    return "\n\n".join(parts)
+
 
 def render_policy_preview(*, mode: str) -> str:
     analyze_base = get_analyze_instruction(mode)
+
     st.subheader("🧭 解析プロンプト（System）")
-    st.code(analyze_base, language="markdown")
-    with st.expander("共通方針（Systemに毎回付与）", expanded=False):
+    #st.code(analyze_base, language="markdown")
+    # --- 解析プロンプト（System）を折りたたみ ---
+    with st.expander("🧭 解析プロンプト（解析モード）", expanded=False):
+        st.code(analyze_base, language="markdown")
+
+    # --- 共通方針を折りたたみ ---
+    with st.expander("📋 共通方針（毎回付与）", expanded=False):
         st.code(COMMON_PROMPT.strip(), language="markdown")
-    st.markdown("**✍️ 追加プロンプト（任意）**")
-    return st.text_area(
-        "追加プロンプト",
-        key="extra_user_prompt",
-        placeholder="例）外来語はカタカナ優先。製品名や固有名詞は原文どおりに保持。",
-        height=100,
-    ) or ""
+
+    # --- 追加プロンプトを折りたたみ ---
+    with st.expander("✍️ 追加プロンプト（任意）", expanded=False):
+        return st.text_area(
+            "追加プロンプトを入力",
+            key="extra_user_prompt",
+            placeholder="例）外来語はカタカナ優先。製品名や固有名詞は原文どおりに保持。",
+            height=100,
+        ) or ""
+
 
 # ------------------------------------------------------------
 # Markdown表 → 配列（頁/行/重要度/原文/修正案/理由）
@@ -411,7 +371,9 @@ def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str,
     client = openai_client()
     md_tables: List[str] = []
     total_pages = (len(lines) + lines_per_page - 1) // lines_per_page
-    sys_inst_template = build_sys_inst(get_analyze_instruction(mode), extra)
+
+    # ★ ここだけ変更：モード＋追加プロンプトから System プロンプトを生成
+    sys_inst_template = build_system_prompt(mode=mode, extra=extra)
 
     for pg in range(total_pages):
         start = pg * lines_per_page
@@ -433,18 +395,27 @@ def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str,
         out.append(f"#### 頁 {i}\n\n{tbl}\n")
     return "\n".join(out)
 
+
 # ------------------------------------------------------------
 # 画面（解析のみ）
 # ------------------------------------------------------------
-st.title("📝 解析（校正方針の抽出）")
+st.title("📝 文章の校正")
+st.caption(
+    "数段落程度の文章を貼り付けて，解析のボタンを押してください．解析には少し時間がかかります．"
+    "校正にはAIを使用していますので，個人情報や機密文書の取り扱いには注意してください。"
+)
 st.write("本文を入力して **① 解析** を実行すると、ページ/行/理由つきの校正方針（Markdown表）を生成します。")
+
+# 1) 初期化（最初の1回だけ）
+if "chat_model" not in st.session_state:
+    st.session_state["chat_model"] = DEFAULT_MODEL
+
 
 with st.sidebar:
     st.header("設定")
     st.radio(
         "🧠 使用モデル",
         MODEL_OPTIONS,
-        index=MODEL_OPTIONS.index(st.session_state["chat_model"]),
         key="chat_model",
     )
     st.selectbox(
@@ -470,10 +441,18 @@ extra_prompt = render_policy_preview(mode=st.session_state["proof_mode"])
 st.markdown("---")
 
 # ===== 入力（ファイル / 貼り付け） =====
-tab_file, tab_paste = st.tabs(["📁 ファイルから", "📝 貼り付けテキスト"])
+tab_paste, tab_file = st.tabs(["📝 貼り付けテキスト","📁 ファイルから"])
 
 src_text = ""
 used_file_name = None
+
+# 先に初期値（必要なら一度だけ）
+if "pasted_text" not in st.session_state:
+    st.session_state["pasted_text"] = ""
+
+# def _on_paste():
+#     st.session_state["has_paste"] = bool(st.session_state["pasted_text"].strip())
+
 
 with tab_file:
     col_u, col_btn1 = st.columns([3, 1])
@@ -507,13 +486,21 @@ with tab_file:
                 st.error(str(e)); st.stop()
 
 with tab_paste:
+   
     pasted = st.text_area(
         "ここに本文を貼り付け",
         height=260,
-        placeholder="ここに本文を貼り付けてください（改行は保持されます）。"
+        key="pasted_text",
+        placeholder="ここに本文を貼り付けてください（改行は保持されます）。",
     )
-    do_analyze_paste = st.button("① 解析（貼り付け）", type="secondary", use_container_width=True, disabled=not pasted.strip(), key="btn_analyze_paste")
-    if pasted:
+
+    do_analyze_paste = st.button("① 解析（貼り付け）", type="primary", use_container_width=True)
+
+    if do_analyze_paste:
+        if not pasted.strip():
+            st.warning("テキストを貼り付けてください。")
+            st.stop()
+
         src_text = load_text_from_paste(
             pasted,
             normalize=True,
@@ -522,6 +509,7 @@ with tab_paste:
             trim_trailing=True,
         )
         used_file_name = "pasted_text.txt"
+
 
 # ===== 解析の実行 =====
 if src_text:

@@ -17,6 +17,18 @@ import numpy as np
 import pandas as pd
 
 
+def safe_to_numeric(s: pd.Series) -> pd.Series:
+    """
+    数値に変換できるときだけ数値化し、
+    ダメなときはそのまま返す（errors='ignore' 相当）。
+    """
+    try:
+        return pd.to_numeric(s)  # errors を渡さない
+    except Exception:
+        return s
+
+
+
 # =========================
 # ユーティリティ（前処理）
 # =========================
@@ -95,7 +107,9 @@ def parse_pasted_robust(raw: str) -> tuple[str, pd.DataFrame, dict]:
                 for c in df.columns:
                     if df[c].dtype == object:
                         df[c] = df[c].astype(str).str.strip().replace({"": np.nan})
-                        df[c] = pd.to_numeric(df[c].replace({",": ""}, regex=True), errors="ignore")
+                        cleaned = df[c].replace({",": ""}, regex=True)
+                        df[c] = safe_to_numeric(cleaned)
+                        # df[c] = pd.to_numeric(df[c].replace({",": ""}, regex=True), errors="ignore")
                 return title, df, diag
         except Exception as e:
             diag["attempts"].append({"sep": repr(delim), "ok": False, "err": str(e)})

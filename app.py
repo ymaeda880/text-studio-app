@@ -10,7 +10,7 @@ st.caption("Check・Translate・Summarize・Refine — all in one workspace.")
 
 st.markdown(
     """
-    左サイドバーの **Pages** から機能ページへ移動してください。  
+    **左サイドバーの項目**をクリックして各機能ページへ移動してください。  
     まずは **校正** ページをお試しください。
     """
 )
