@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/70_レッドリスト_福島チェック.py
+# pages/90_レッドリスト_福島チェック.py
 # _app/redlist/{fukushima, MOE, prec, chiba} にある CSV / Excel をスキャンして先頭N行を表示
 # さらに prec ×（環境省 和名／福島県 和名）で照合し、元ファイル名・シート名・行番号も併記
 

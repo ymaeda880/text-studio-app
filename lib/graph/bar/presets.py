@@ -49,6 +49,9 @@ DEFAULTS: Dict[str, object] = {
     "m_k_tick_font_family": "(グラフ全体と同じ)",
     "m_k_use_headers_as_axis_title": True,
 
+    # 軸の値の表示形式 & スケール
+    "m_k_value_format_mode": "そのまま",  # そのまま / カンマ区切り
+
     # 目盛（位置/長さ/ラベル位置/角度）
     "m_k_ticks_x": "outside",           # outside / inside / (なし)
     "m_k_ticks_y": "outside",
@@ -95,6 +98,10 @@ DEFAULTS: Dict[str, object] = {
 
     # 棒ラベルの表示モード
     "m_k_bar_label_mode": "非表示",
+    "m_k_label_font_size": 11,
+    "m_k_label_font_family": "(グラフ全体と同じ)",
+    "m_k_label_decimals": 0,   # 小数点以下の桁数
+
 
     # ハイライト関連（上位K本）
     "m_k_enable_highlight": False,
@@ -110,6 +117,49 @@ DEFAULTS: Dict[str, object] = {
     "m_k_plot_bgcolor": "white",    # プロット領域の背景
     "m_k_paper_bgcolor": "white",   # 全体（余白部分）の背景
 
+    # データの変換
+    "m_k_scale_exp_data": 0,   # ★ データスケーリング（10^x）のデフォルト値
+
+    # Annotation（カテゴリラベルを annotation で描くモード）のデフォルト
+
+    # Annotation ラベルを使うか？
+    "m_k_use_annotation_labels": False,
+
+    # Annotation テキストのフォントサイズ
+    "m_k_anno_font_size": 12,
+
+    # Annotation テキストのフォントファミリー
+    # "(グラフ全体と同じ)" を使うことで統一したフォントにできる
+    "m_k_anno_font_family": "(グラフ全体と同じ)",
+
+    # Annotation 用 左側マージン幅（px）
+    # 長い日本語ラベルを想定して余裕をもった値
+    "m_k_anno_margin_left": 260,
+
+    # Annotation テキストの X 位置（paper 座標系）0〜1
+    # 推奨：0（グラフ左端）
+    "m_k_anno_x": 0.0,
+
+    # "ピクセル単位のずらし
+    "m_k_anno_xshift": -10,
+
+    # Annotation テキストの行揃え（left/center/right）
+    "m_k_anno_align": "left",
+
+    # Annotation テキストのアンカー
+    # "left" / "center" / "right"
+    # 横棒グラフの場合、右揃えのまま align=left の組み合わせが綺麗
+    "m_k_anno_xanchor": "right",
+
+    # Annotation テキストの色
+    "m_k_anno_color": "#000000",
+
+    # Annotation を表示するのは横棒のみ？
+    "m_k_anno_horizontal_only": True,
+
+    # Annotation の vertical alignment
+    "m_k_anno_valign": "middle",
+
 
 }
 
@@ -123,14 +173,14 @@ B\t75\t65\t78
 C\t80\t70\t88
 """
 
-sample_hint3 = """（問４）環境に対する学習意欲
+sample_hint3 = """オンライン学習サービスの利用意向
 項目\t割合
-環境について学ぶ講座や研修会に<br>興味はあるが、出席したことはない\t0.342
-環境についてインターネットや<br>書物などで、自主的に学びたいと<br>思っているが、まだ実践していない\t0.216
-環境についてインターネットや<br>書物などで、自主的に学んでいる\t0.177
-環境について学ぶ講座や研修会に<br>出席したことがある\t0.117
-環境についての学習に関心はない\t0.106
-その他\t0.042
+オンライン講座に興味はあるが、<br>まだ利用したことがない\t0.331
+スキル向上のためにオンライン教材を<br>探してみたいと思っているが、<br>まだ実際には試していない\t0.249
+定期的にオンライン講座や<br>動画教材を利用して学習している\t0.183
+一度だけオンライン講座を<br>受講した経験がある\t0.122
+オンライン学習には特に興味がない\t0.085
+その他\t0.030
 """
 
 sample_hint2 = """成績（サンプル）
@@ -143,6 +193,19 @@ sample_hint2 = """成績（サンプル）
 渡辺 綾\t62\t96\t66
 中村 健\t77\t63\t84
 """
+
+sample_hint4 = """日本のGDP
+年\t名目GDP
+2015\t520000000000000
+2016\t535000000000000
+2017\t548000000000000
+2018\t556000000000000
+2019\t560000000000000
+2020\t540000000000000
+2021\t558000000000000
+2022\t575000000000000
+"""
+
 
 # =========================
 #  色パレット
@@ -237,36 +300,6 @@ PRESETS: Dict[str, Dict] = {
     "標準（DEFAULTS相当）": {
         # 必要なら個別の上書きを書く（今は DEFAULTS と同等）
     },
-    "アンケート": {
-        "m_k_tick_font_size": 12,
-        "m_k_orientation": "横",
-        "m_k_plot_bgcolor": "#f5f5f5",
-        "m_k_paper_bgcolor": "white",
-    },
-    # アンケート用：横棒 + 右ラベル + 上位K本だけ色を変え、他は薄グレー
-    "アンケート2": {
-        "m_k_tick_font_size": 12,
-        "m_k_orientation": "横",
-        "m_k_bar_label_mode": "右側に表示",
-        "m_k_show_legend": False,
-
-        "m_k_use_headers_as_axis_title": False,
-
-        # ハイライト設定
-        "m_k_enable_highlight": True,
-        "m_k_highlight_top_k": 3,   # 上位3本
-        "m_k_highlight_color_label": "ピンク (#f17c9b)",
-        "m_k_highlight_color": "#f17c9b",
-
-        # 非ハイライト棒の色（残りの棒を淡いグレーに）
-        "m_k_nonhighlight_color_label": "うすグレー (#d9d9d9)",
-        "m_k_nonhighlight_color": "#d9d9d9",
-
-        "m_k_plot_bgcolor": "white",
-        "m_k_paper_bgcolor": "white",
-
-        "m_k_font_family":	"Meiryo",
-    },
     "論文：左余白広め・外ラベル": {
         "m_k_margin_l": 90, "m_k_margin_r": 20, "m_k_margin_t": 60, "m_k_margin_b": 60,
         "m_k_ticks_y": "outside", "m_k_ticklen_y": 6, "m_k_ticklabelpos_y": "外-左",
@@ -322,5 +355,67 @@ PRESETS: Dict[str, Dict] = {
         "m_k_color_alpha": 0.9,
         "m_k_x_title_standoff": 14,
         "m_k_y_title_standoff": 14,
+    },
+    "サンプル1": {
+        "k_bar_mode": "手動",
+        "m_manual_bar_width": 0.5,
+
+        # == プレビューサイズ ===
+        "m_k_preview_width": 700,
+    },
+    "サンプル2": {
+        "k_bar_mode": "自動",
+
+        #// === 色・背景・ハイライト色 ===
+        "m_k_palette_name": "Corporate",
+
+    },
+    # アンケート用：横棒 + 右ラベル + 上位K本だけ色を変え、他は薄グレー
+    "サンプル3": {
+        "m_k_tick_font_size": 12,
+        "m_k_orientation": "横",
+
+        "m_k_bar_label_mode": "表示",
+        "m_k_label_decimals": 2,   # 小数点以下の桁数
+
+        "m_k_show_legend": False,
+
+        "m_k_use_headers_as_axis_title": False,
+
+        # ハイライト設定
+        "m_k_enable_highlight": True,
+        "m_k_highlight_top_k": 3,   # 上位3本
+        "m_k_highlight_color_label": "ピンク (#f17c9b)",
+        "m_k_highlight_color": "#f17c9b",
+
+        # 非ハイライト棒の色（残りの棒を淡いグレーに）
+        "m_k_nonhighlight_color_label": "うすグレー (#d9d9d9)",
+        "m_k_nonhighlight_color": "#d9d9d9",
+
+        "m_k_plot_bgcolor": "white",
+        "m_k_paper_bgcolor": "white",
+
+        "m_k_font_family":	"Meiryo",
+
+        #// === カテゴリラベル（annotation） ===
+        "m_k_use_annotation_labels": True,
+        "m_k_anno_x": -0.45,
+        "m_k_anno_xanchor": "left",
+
+        # == プレビューサイズ ===
+        "m_k_preview_height": 400,
+    },
+       "サンプル4": {
+        #// === 色・背景・ハイライト色 ===
+        "m_k_palette_name": "SingleEmerald",
+        
+        #// === 棒の向き・バー表示・ハイライト ===
+        "m_k_bar_mode": "手動",
+        "m_k_bar_width": 0.7,
+
+        #// === データのスケーリング，カンマ区切り表示 ===
+        "m_k_scale_exp_data": -11,
+        "m_k_value_format_mode": "カンマ区切り"
+       
     },
 }

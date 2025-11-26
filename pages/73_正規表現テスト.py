@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/50_正規表現テスト.py
+# pages/73_正規表現テスト.py
 # 任意のテキストから「図/表/図表 + 番号（例: 表 2.1-1）」だけを抽出して表示する簡易テスター
 
 from __future__ import annotations

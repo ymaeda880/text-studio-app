@@ -18,31 +18,33 @@ import streamlit as st
 import pandas as pd
 
 from lib.graph.parsing_utils import parse_pasted_robust
-from lib.graph.bar.presets import DEFAULTS   # ★これを追加
 
 
 def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
     """
-    「1) データ貼り付け」UI を描画し、**スケーリング後 DataFrame** を返す。
-    スケール指数は session_state["m_k_scale_exp_data"] を使う。
+    「1) データ貼り付け」UI を描画し、スケーリング後 DataFrame を返す。
     """
 
     # -----------------------------
     # 0) スケール指数入力（10^x を掛ける）
     # -----------------------------
-    # PRESETS / DEFAULTS から事前に m_k_scale_exp_data が入っていればその値を使う
+    # 旧キー scale_exponent が残っている場合も吸収しつつ、
+    # 最終的には m_k_scale_exp_data を正とする
     if "m_k_scale_exp_data" not in st.session_state:
-        st.session_state["m_k_scale_exp_data"] = 0  # デフォルト 10^0
+        # ① まず昔のキー scale_exponent があればそれを採用
+        if "scale_exponent" in st.session_state:
+            st.session_state["m_k_scale_exp_data"] = int(st.session_state["scale_exponent"])
+        else:
+            # ② それも無ければ 0（または DEFAULTS の値）で初期化
+            st.session_state["m_k_scale_exp_data"] = 0
 
-    # st.number_input(
-    #     "スケール指数 × (10^x を掛ける)",
-    #     min_value=-15,
-    #     max_value=15,
-    #     step=1,
-    #     # value=int(st.session_state.get("m_k_scale_exp_data", 0)),   # ← value を入れる
-    #     key="m_k_scale_exp_data",
-    # )
-
+    st.number_input(
+        "スケール指数 × (10^x を掛ける)",
+        min_value=-15,
+        max_value=15,
+        step=1,
+        key="m_k_scale_exp_data",   # ★ ここを m_k_scale_exp_data に変更
+    )
 
     # -----------------------------
     # 1) タイトルなし用の簡易パーサ
@@ -54,13 +56,14 @@ def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
         """
         diag: dict = {"mode": "no_title", "lines": 0, "delimiter": None}
 
+        # テキスト整形
         t = raw.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
         lines = [ln.rstrip() for ln in t.split("\n")]
 
         # 先頭の空行を削除
         while lines and lines[0].strip() == "":
             lines.pop(0)
-        # 末尾の余計な空行を削る
+        # 末尾側の余計な空行を削る
         while len(lines) >= 2 and lines[-1].strip() == "" and lines[-2].strip() == "":
             lines.pop()
 
@@ -87,6 +90,7 @@ def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
             if delim is not None:
                 df = pd.read_csv(io.StringIO(text_for_pandas), sep=delim)
             else:
+                # デリミタ不明 → header=0 で pandas に任せる
                 df = pd.read_csv(io.StringIO(text_for_pandas), header=0)
         except Exception as e:
             diag["reason"] = f"pandas_error: {e}"
@@ -99,25 +103,16 @@ def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
     # 2) 内部コールバック：貼り付けテキストを解析 & スケーリング
     # -----------------------------
     def _ingest_text():
-        # 0) まず棒グラフ関連のパラメータを DEFAULTS でリセット
-        #    - data_df や raw_text など「データ系」はここでは触らない
-        for k, v in DEFAULTS.items():
-            st.session_state[k] = v
-
-        # 1) スタイルパネル用のトグル／タブ状態を初期化
-        st.session_state["exp_style_all_open"] = False
-        if "m_k_style_tab_choice" in st.session_state:
-            del st.session_state["m_k_style_tab_choice"]
-
-        # 2) ここから先はこれまでと同じ「テキスト → DataFrame」処理
         raw = st.session_state.get("raw_text", "")
         title_row_mode = st.session_state.get("m_k_title_row_mode", "1行目はタイトル")
 
-        # ① 生データ DataFrame を作る（base_df）
+        # ① 生データ DataFrame を作る
         if title_row_mode.startswith("タイトルなし"):
+            # 1行目 = ヘッダー として解釈（グラフタイトルは空）
             base_df, diag = _parse_no_title(raw)
             title = ""
         else:
+            # 1行目=タイトル, 2行目=ヘッダー
             title, base_df, diag = parse_pasted_robust(raw)
 
         if base_df.empty:
@@ -131,19 +126,22 @@ def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
                 st.warning("貼り付けを認識できませんでした。タイトル1行 + 表形式にしてください。")
             return
 
-        # ② スケーリング対象列を「グラフ作成ボタン押下ごとに」初期化
-        cols = list(base_df.columns)
-        if len(cols) >= 2:
-            st.session_state["scale_target_cols"] = cols[1:]
-        else:
-            st.session_state["scale_target_cols"] = cols
+        # ② デフォルトのスケーリング対象列（初回のみ）
+        if "scale_target_cols" not in st.session_state:
+            # 通常は 1列目がカテゴリなので，2列目以降をデフォルト候補にする
+            if len(base_df.columns) >= 2:
+                st.session_state["scale_target_cols"] = list(base_df.columns[1:])
+            else:
+                st.session_state["scale_target_cols"] = list(base_df.columns)
 
-        target_cols = st.session_state["scale_target_cols"]
-
-        # ③ スケーリング（**必ず base_df から再計算**）
+        target_cols = st.session_state.get("scale_target_cols", [])
         exp = int(st.session_state.get("m_k_scale_exp_data", 0))
         factor = 10 ** exp
 
+        # （互換用）旧キーにもミラーしておきたい場合は
+        st.session_state["scale_exponent"] = exp
+
+        # ③ スケーリング（base_df → scaled_df）
         scaled_df = base_df.copy()
         if factor != 1:
             for col in target_cols:
@@ -151,123 +149,48 @@ def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
                     continue
                 s = pd.to_numeric(scaled_df[col], errors="coerce")
                 mask = s.notna()
+                # 数値に変換できたセルだけスケーリング
                 scaled_df.loc[mask, col] = s[mask] * factor
 
         # ④ 結果を session_state に保存
-        st.session_state["data_df_base"] = base_df      # 元データ（非スケーリング）
-        st.session_state["data_df"] = scaled_df         # スケーリング後（グラフ用）
+        st.session_state["data_df_base"] = base_df          # 元データ（非スケーリング）
+        st.session_state["data_df"] = scaled_df             # グラフに使うデータ
         st.session_state["data_diag"] = diag
         st.session_state["data_title"] = title or ""
 
-        # グラフタイトル
+        # グラフタイトル：タイトル行があるときはそれを、ないときは空にする
         st.session_state["m_k_chart_title"] = title or ""
 
-        # 軸タイトル候補
+        # 軸タイトルも毎回上書き
         cols = list(base_df.columns)
         if cols:
             st.session_state["m_k_x_title"] = cols[0]
+
         y_cols = cols[1:]
         if y_cols:
             st.session_state["m_k_y_title"] = (
                 " / ".join(y_cols) if len(y_cols) <= 3 else f"{len(y_cols)}系列"
             )
 
-
-
-    # -----------------------------
-    # スケーリングだけ再計算する関数
-    # -----------------------------
-    def _rescale_only():
-        # base_df（元データ）が存在しないと実行できない
-        if "data_df_base" not in st.session_state:
-            st.warning("先に『データの解析』を行ってください。")
-            return
-
-        base_df = st.session_state["data_df_base"]
-        target_cols = st.session_state.get("scale_target_cols", [])
-
-        exp = int(st.session_state.get("m_k_scale_exp_data", 0))
-        factor = 10 ** exp
-
-        scaled_df = base_df.copy()
-        if factor != 1:
-            for col in target_cols:
-                if col in scaled_df.columns:
-                    s = pd.to_numeric(scaled_df[col], errors="coerce")
-                    scaled_df.loc[s.notna(), col] = s[s.notna()] * factor
-
-        st.session_state["data_df"] = scaled_df
-        st.success("スケーリングを更新しました。")
-
     # -----------------------------
     # 3) テキスト入力欄
     # -----------------------------
-    if "raw_text" not in st.session_state:
-        st.session_state["raw_text"] = sample_hint
-
     st.text_area(
         "Excelの表を貼り付け（1行目=タイトル or ヘッダー）",
-        #value=st.session_state.get("raw_text", sample_hint),
-        #sample_hint,
+        sample_hint,
         height=180,
         key="raw_text",
     )
 
     # -----------------------------
-    # 3.5) サンプル編集 → ラジオを「なし」に戻す
+    # 4) 解析実行ボタン
     # -----------------------------
-    # サンプル選択中に raw_text がサンプル文字列から変わったら
-    # 「サンプルデータの種類」を自動的に「なし」に戻す
-    # if "sample_choice" in st.session_state:
-    #     sample_choice = st.session_state["sample_choice"]
-    #     raw = st.session_state.get("raw_text", "")
-
-    #     # サンプル選択中 かつ 中身が「そのサンプルのテキスト」と違っていたら
-    #     if sample_choice != "なし" and raw and raw != sample_hint:
-    #         st.session_state["sample_choice"] = "なし"
-    #         st.session_state["__prev_sample_choice"] = "なし"
-    #         st.rerun()
-
-
-    # 4) 解析実行ボタン（横に2つ）
-    col1, col2, col3, col4 = st.columns([1.4, 0.8, 1.4, 0.4])
-
-    with col1:
-        st.button(
-            "📥 データの解析",
-            type="primary",
-            on_click=_ingest_text,
-            use_container_width=True,
-        )
-
-    with col2:
-        st.button(
-            "スケーリング",
-            type="secondary",
-            on_click=_rescale_only,
-            use_container_width=True,
-        )
-
-    with col3:
-        # ラベル側だけ少し下げて、number_input と高さを合わせる
-        st.markdown(
-            "<div style='margin-top:8px; font-weight:600;'>"
-            "スケール指数 × (10^x を掛ける)"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
-    with col4:
-        st.number_input(
-            "スケール指数 × (10^x を掛ける)",   # アクセシビリティ用に入れておく
-            min_value=-15,
-            max_value=15,
-            step=1,
-            key="m_k_scale_exp_data",
-            label_visibility="collapsed",       # ラベル表示は消す
-        )
-
-
+    st.button(
+        "▶️ グラフ作成（データの解析を実行）",
+        type="primary",
+        on_click=_ingest_text,
+        use_container_width=True,
+    )
 
     # -----------------------------
     # 5) 解析前なら案内して停止
@@ -282,22 +205,25 @@ def render_data_input(sample_hint: str, mini_toggle) -> pd.DataFrame:
     df = st.session_state["data_df"]
     chart_title = st.session_state.get("m_k_chart_title", "")
 
+    # スケーリング対象列の選択（グラフ作成後に出る）
     current_targets = st.session_state.get("scale_target_cols", [])
     st.multiselect(
         "スケーリング対象列（10^x を掛ける列）",
         options=list(df.columns),
-        # default=current_targets,
+        default=current_targets,
         key="scale_target_cols",
         help="列の選択を変えた場合は、もう一度『グラフ作成』ボタンを押してください。",
     )
 
+    # タイトル候補表示
     st.success(f"タイトル候補：**{chart_title or '(未設定)'}**")
 
+    # 上位 50 行のプレビュー（スケーリング後）
     st.markdown("#### グラフ用データ（スケーリング後 df）")
     st.dataframe(df.head(50), use_container_width=True)
 
     # -----------------------------
-    # 7) パース診断
+    # 7) パース診断（ミニトグル + エクスパンダ）
     # -----------------------------
     st.markdown('<div class="mini-toggle-row"></div>', unsafe_allow_html=True)
     mini_toggle("🩺 パース診断を開く（状態を保持）", key="exp_diag_open")

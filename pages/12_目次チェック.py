@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# pages/22_目次チェック.py — 目次候補 ↔ 本文（行スキャン）照合（簡略版）
+# pages/1
+# 2_目次チェック.py — 目次候補 ↔ 本文（行スキャン）照合（簡略版）
 
 from __future__ import annotations
 import io, tempfile
@@ -7,26 +8,22 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from lib.toc_segments import (
+from lib.toc_check.toc_segments import (
     pdf_to_text_per_page,
     extract_toc_lines,
     build_segments,
     validate_segments,
     check_toc_by_order,
 )
+from lib.toc_check.explanation import render_toc_logic_expander
+
 
 st.set_page_config(page_title="📄 目次チェック（ローカル照合）", page_icon="📄", layout="wide")
 st.title("📄 目次チェック")
 st.caption("目次候補（目次タイトルと頁）を本文に対して **行ごとに順番に** 照合します。")
 st.caption("AIは使用していません．安心してpdfを丸ごとアップロードしてください．")
 
-with st.expander("ℹ️ このツールが拾う目次と頁番号のルール（クリックで展開）", expanded=False):
-    st.markdown("""
-**概要**: PDFの目次から「見出し＋頁番号」を抽出し、本文の該当ページで行スキャン照合します（2行結合窓対応）。  
-- 末尾ラベルの形式: `12`, `1-2`, `3-10-2`, `資料2`, `資料2-1`, `(資料)12` など  
-- 本文ページの単独行ラベルを抽出し、**連番/章番号/シリーズ**の妥当性をチェックしてから照合します。  
-- 章番号タイトル（例 `4-2-2`）は **完全一致** のみ許可。
-""")
+render_toc_logic_expander()
 
 uploaded = st.file_uploader("PDF をアップロード", type=["pdf"])
 c1, c2 = st.columns([1,1])
@@ -122,9 +119,15 @@ with pd.ExcelWriter(xlsx_buf, engine="xlsxwriter") as writer:
     for j, name in enumerate(cols): ws.write(0, j, name, header_fmt)
     ws.freeze_panes(1, 0)
 
+# 入力ファイル名から拡張子除去
+base = uploaded.name.rsplit(".", 1)[0]
+
+# 日本語ファイル名： 目次チェック_XXXX.xlsx
+xlsx_filename = f"目次チェック_{base}.xlsx"
+
 st.download_button(
     "📥 照合結果をExcelで保存 (.xlsx)",
     data=xlsx_buf.getvalue(),
-    file_name="toc_check_local_result.xlsx",
+    file_name=xlsx_filename,
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )

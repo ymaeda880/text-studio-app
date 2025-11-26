@@ -2,15 +2,12 @@
 # lib/graph/bar/jsonc_presets.py
 #
 # 棒グラフページ用の JSONC プリセット入出力ユーティリティ
-# - 現在の設定を JSONC（コメント付き JSON）としてダウンロード
-# - JSONC ファイルを読み込んでセッションに適用
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
 import json
 import re
-
 
 # ------------------------------
 # どのキーをどのカテゴリとして出すかの定義
@@ -24,8 +21,8 @@ TITLE_KEYS = [
 
 ORIENTATION_KEYS = [
     "m_k_orientation",
-    "k_bar_mode",
-    "m_manual_bar_width",
+    "m_k_bar_mode",       # ← 統一版
+    "m_k_bar_width",      # ← 統一版
     "m_k_bar_label_mode",
     "m_k_enable_highlight",
     "m_k_highlight_top_k",
@@ -94,66 +91,57 @@ FRAME_KEYS = [
     "m_k_frame_ref_domain",
 ]
 
+# ★ annotation 関連（カテゴリラベル）★
+ANNOTATION_KEYS = [
+    "m_k_use_annotation_labels",
+    "m_k_anno_horizontal_only",
+    "m_k_anno_x",
+    "m_k_anno_align",
+    "m_k_anno_xanchor",
+    # どちらか片方だけ使っていても OK なように両方入れておく
+    "m_k_anno_yanchor",
+    "m_k_anno_valign",
+    "m_k_anno_font_size",
+    "m_k_anno_color",
+    "m_k_anno_font_family",
+    "m_k_anno_margin_left",
+    "m_k_annotation_margin",
+]
+
+# ★ 値の表示形式・スケーリング関連 ★
+FORMAT_SCALE_KEYS = [
+    "m_k_value_format_mode",  # 「そのまま / カンマ区切り」
+    "m_k_scale_exp_data",     # データスケール指数 10^x
+]
 
 PARAM_GROUPS: List[Dict[str, Any]] = [
-    {
-        "heading": "タイトル関連",
-        "keys": TITLE_KEYS,
-    },
-    {
-        "heading": "棒の向き・バー表示・ハイライト",
-        "keys": ORIENTATION_KEYS,
-    },
-    {
-        "heading": "プレビューサイズ",
-        "keys": SIZE_KEYS,
-    },
-    {
-        "heading": "マージン（余白）",
-        "keys": MARGIN_KEYS,
-    },
-    {
-        "heading": "フォント関連",
-        "keys": FONT_KEYS,
-    },
-    {
-        "heading": "軸タイトル関連",
-        "keys": AXIS_KEYS,
-    },
-    {
-        "heading": "目盛・グリッド線",
-        "keys": TICKS_KEYS,
-    },
-    {
-        "heading": "凡例関連",
-        "keys": LEGEND_KEYS,
-    },
-    {
-        "heading": "色・背景・ハイライト色",
-        "keys": COLOR_KEYS,
-    },
-    {
-        "heading": "内側枠（プロット領域の枠線）",
-        "keys": FRAME_KEYS,
-    },
+    {"heading": "タイトル関連", "keys": TITLE_KEYS},
+    {"heading": "棒の向き・バー表示・ハイライト", "keys": ORIENTATION_KEYS},
+    {"heading": "プレビューサイズ", "keys": SIZE_KEYS},
+    {"heading": "マージン（余白）", "keys": MARGIN_KEYS},
+    {"heading": "フォント関連", "keys": FONT_KEYS},
+    {"heading": "軸タイトル関連", "keys": AXIS_KEYS},
+    {"heading": "目盛・グリッド線", "keys": TICKS_KEYS},
+    {"heading": "凡例関連", "keys": LEGEND_KEYS},
+    {"heading": "色・背景・ハイライト色", "keys": COLOR_KEYS},
+    {"heading": "カテゴリラベル（annotation）", "keys": ANNOTATION_KEYS},
+    {"heading": "値の表示形式・スケーリング", "keys": FORMAT_SCALE_KEYS},
+    {"heading": "内側枠（プロット領域の枠線）", "keys": FRAME_KEYS},
 ]
 
 
 def _build_flat_preset(session_state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    session_state からプリセット対象となるキー（m_k_*, k_bar_mode）だけ抜き出してフラットな dict にする。
+    session_state からプリセット対象となるキー（m_k_* のみ）だけ抜き出してフラットな dict にする。
     """
     return {
         k: v
         for k, v in session_state.items()
-        if isinstance(k, str) and k.startswith(("m_k_", "k_bar_mode"))
+        if isinstance(k, str) and k.startswith("m_k_")
     }
 
 
 def _json_value(v: Any) -> str:
-    """
-    値を JSON 表現の文字列に変換する（ensure_ascii=False で日本語保持）。
-    """
     return json.dumps(v, ensure_ascii=False)
 
 
@@ -164,10 +152,9 @@ def export_jsonc_from_session(session_state: Dict[str, Any]) -> str:
     """
     flat = _build_flat_preset(session_state)
 
-    # 「どのキーをどの順番で出すか」を並べた props リストを作る
     props: List[Dict[str, Any]] = []
-
     used_keys: set[str] = set()
+
     for grp in PARAM_GROUPS:
         heading: str = grp["heading"]
         keys: List[str] = grp["keys"]
@@ -180,7 +167,7 @@ def export_jsonc_from_session(session_state: Dict[str, Any]) -> str:
             props.append({"type": "prop", "key": k, "value": flat[k]})
             used_keys.add(k)
 
-    # 上記いずれにも属さないキーは "その他" としてまとめる
+    # 上のグループに入っていない m_k_* は「その他」としてまとめる
     other_keys = [k for k in flat.keys() if k not in used_keys]
     if other_keys:
         props.append({"type": "comment", "text": "=== その他の設定 ==="})
@@ -190,7 +177,6 @@ def export_jsonc_from_session(session_state: Dict[str, Any]) -> str:
     lines: List[str] = []
     lines.append("{")
 
-    # 最後の prop の位置を把握して、そこだけカンマを付けない
     prop_indices = [i for i, p in enumerate(props) if p["type"] == "prop"]
     last_prop_index = prop_indices[-1] if prop_indices else -1
 
@@ -217,40 +203,42 @@ _COMMENT_LINE_RE = re.compile(r"(^|\s)//.*$")
 def strip_jsonc_comments(text: str) -> str:
     """
     JSONC テキストから // と /* */ のコメントを取り除いて純粋な JSON にする。
-    ※簡易実装なので、文字列中の // などは使わない前提。
     """
-    # /* ... */ コメントを削除（複数行対応）
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
 
-    # 行末の // コメントを削除
     lines = []
     for line in text.splitlines():
-        # // から右側を落とす
         line = _COMMENT_LINE_RE.sub(r"\1", line)
         lines.append(line)
     return "\n".join(lines)
 
 
 def load_preset_from_jsonc(text: str) -> Dict[str, Any]:
-    """
-    JSONC テキストを dict にして返す。
-    """
     cleaned = strip_jsonc_comments(text)
     obj = json.loads(cleaned)
     if not isinstance(obj, dict):
         raise ValueError("プリセット JSONC はオブジェクト（{ ... }）である必要があります。")
-    # キーは str のみ対象にする
     return {str(k): v for k, v in obj.items()}
 
 
 def apply_preset_to_session(preset: Dict[str, Any], session_state: Dict[str, Any]) -> None:
     """
     読み込んだプリセット dict を session_state に適用する。
-    - m_k_* / k_bar_mode など、既存のパラメータだけを対象にする。
+    - m_k_* のみを対象にする。
+    - 旧キー（k_bar_mode, m_manual_bar_width）が含まれていた場合は
+      m_k_bar_mode / m_k_bar_width にマッピングして適用する（後方互換用）。
     """
     for k, v in preset.items():
         if not isinstance(k, str):
             continue
-        # 今回は m_k_, k_bar_mode のみ対象（必要ならここに条件を足す）
-        if k.startswith(("m_k_", "k_bar_mode")):
+
+        # 旧キー → 新キーへのマッピング（JSONCだけ互換）
+        if k == "k_bar_mode":
+            session_state["m_k_bar_mode"] = v
+            continue
+        if k == "m_manual_bar_width":
+            session_state["m_k_bar_width"] = v
+            continue
+
+        if k.startswith("m_k_"):
             session_state[k] = v

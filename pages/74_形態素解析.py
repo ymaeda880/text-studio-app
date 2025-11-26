@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/52_形態素解析.py
+# pages/74_形態素解析.py
 from __future__ import annotations
 
 import io

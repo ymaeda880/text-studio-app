@@ -95,12 +95,77 @@ def add_inner_frame(
             layer="above",
         )
 
-
-
-
-
-   
   
+# =========================
+# 数値スケール変換 & ラベル整形ヘルパ
+# =========================
+
+def transform_value_for_plot(
+    v: float,
+    *,
+    stack_mode: str,
+    scale_enabled: bool,
+    scale_exp: int,
+) -> float:
+    """
+    プロットに使う「数値」を変換するヘルパ。
+
+    - stack_mode が 「割合(%)」 のときは、そのまま（0〜100 を前提）。
+    - それ以外では、scale_enabled=True なら 10^scale_exp を掛ける。
+      例）scale_exp=2 → 100倍（実質パーセント表示のように使える）
+          scale_exp=-4 → 万単位に変換（10^-4）
+    """
+    try:
+        fv = float(v)
+    except Exception:
+        return v
+
+    if stack_mode == "割合(%)":
+        return fv
+
+    if not scale_enabled or scale_exp == 0:
+        return fv
+
+    return fv * (10.0 ** scale_exp)
+
+
+def format_number_for_label(
+    v: float,
+    *,
+    stack_mode: str,
+    scale_enabled: bool,
+    scale_exp: int,
+    decimals: int,
+    format_mode: str,
+) -> str:
+    """
+    ラベル用の文字列を生成するヘルパ。
+
+    - transform_value_for_plot と同じルールでスケール変換した値に対して、
+      小数桁数とフォーマット（カンマ区切り or そのまま）を適用。
+    - パーセント記号などは付けない（必要なら軸タイトルや注記で対応）。
+    """
+    try:
+        fv = float(v)
+    except Exception:
+        return str(v)
+
+    # プロット用と同じスケール変換を行う
+    sv = transform_value_for_plot(
+        fv,
+        stack_mode=stack_mode,
+        scale_enabled=scale_enabled,
+        scale_exp=scale_exp,
+    )
+
+    if format_mode == "カンマ区切り":
+        return f"{sv:,.{decimals}f}"
+    else:
+        # "そのまま" を想定
+        return f"{sv:.{decimals}f}"
+
+
+
 # =========================
 # 凡例レイアウトヘルパ
 # =========================
@@ -148,3 +213,5 @@ def legend_config(
         )
     )
     return cfg
+
+

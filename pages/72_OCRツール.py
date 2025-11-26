@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/28_OCRツール.py — PDF→OCR→テキスト抽出＆保存（プレビューなし）
+# pages/72_OCRツール.py — PDF→OCR→テキスト抽出＆保存（プレビューなし）
 from __future__ import annotations
 from pathlib import Path
 import sys

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/24_図表チェック.py（改良版：強調表示・excerpt付き + 番号品質/突き合わせ + XLSX出力）
+# pages/14_図表チェック.py（改良版：強調表示・excerpt付き + 番号品質/突き合わせ + XLSX出力）
 from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
@@ -14,9 +14,20 @@ from lib.text_normalizer import (
     normalize_strict,
     HY,
 )
-from lib.toc_segments import (
+from lib.toc_check.toc_segments import (
     pdf_to_text_per_page,
     extract_single_page_label,
+)
+from lib.chart_check.explanation import render_numbering_logic_expander  # ★追加
+from lib.chart_check.helpers import (
+    base_key,
+    index_pages_by_key,
+    ref_aggregate_for_view,
+    caption_info_first_by_key,
+    aggregate_ref_info,
+    make_crosscheck_rows,
+    protect_for_excel_csv,
+    protect_for_excel_xlsx,
 )
 
 # =========================
@@ -24,10 +35,15 @@ from lib.toc_segments import (
 # =========================
 st.set_page_config(page_title="🖼️ 図表 抽出（行頭/助詞/句点ルール + 頁ラベル）", page_icon="🖼️", layout="wide")
 st.title("🖼️ 図表の参照照合チェック")
-st.caption("図表番号と本文の参照に対して照合してチェックを行います。"
-           "（１）図表があるのに本文で参照されていないもの，（２）本文で参照されているのに図表の本体がないもの,"
-           "（３）図表番号が重複しているものをチェックします．")
+st.caption(
+    "図表番号と本文の参照に対して照合してチェックを行います。"
+    "（１）図表があるのに本文で参照されていないもの，（２）本文で参照されているのに図表の本体がないもの,"
+    "（３）図表番号が重複しているものをチェックします．"
+)
 st.caption("AIは使用していません．安心してpdfを丸ごとアップロードしてください．")
+
+# 👇 利用者向けのロジック説明（折りたたみ）
+render_numbering_logic_expander()
 
 uploaded = st.file_uploader("PDF をアップロード", type=["pdf"])
 run = st.button("▶ 解析を実行", type="primary", use_container_width=True)
@@ -57,29 +73,49 @@ DOT = r"[\.．・･]"
 NUM_ZH = r"[0-9０-９]+"
 NUM_TOKEN = rf"""
 (
+    # 例：4.2-1(1/6), 4.2-1（1／６） など
     {NUM_ZH}
     (?:\s*(?:{DOT}|{HY})\s*{NUM_ZH})*
+    (?:\s*[（(]?\s*{NUM_ZH}\s*[\/／]\s*{NUM_ZH}\s*[）)])?
     |
+    # 例：(1), （２）
     [（(]\s*{NUM_ZH}\s*[）)]
 )
 """
+
 EXTRACT_RE = re.compile(
     rf"(?P<kind>図表|図|表)\s*(?P<num>{NUM_TOKEN})",
     re.X
 )
 
+
 def canon_num(num: str) -> str:
+    # 全角 → 半角
     s = num.translate(str.maketrans("０１２３４５６７８９（）", "0123456789()"))
+
+    # ドット類 → "."
     s = re.sub(DOT, ".", s)
+
+    # ハイフン類 → "-"
     s = re.sub(HY, "-", s)
-    s = re.sub(r"[()（）]", "", s)
+
+    # "." と "-" の前後スペース削除
     s = re.sub(r"\s*\.\s*", ".", s)
     s = re.sub(r"\s*-\s*", "-", s)
-    s = re.sub(r"\s+", "", s)
-    return s
+
+    # 複数スペース → 1 個
+    s = re.sub(r"[ \u3000]+", " ", s)
+
+    # 括弧内スペース削除
+    s = re.sub(r"\(\s*", "(", s)
+    s = re.sub(r"\s*\)", ")", s)
+
+    return s.strip()
+
 
 def canon_label(kind: str, num: str) -> str:
     return f"{kind}{canon_num(num)}"
+
 
 try:
     import regex as re2
@@ -87,6 +123,7 @@ except Exception:
     re2 = re
 
 PARTICLES_RE = re2.compile(r"(?:に|を|は|へ|で|と|の|など|等|または|又は|および|及び|かつ)")
+
 
 # ===== 行抽出補助関数 =====
 def extract_line_covering_match(full: str, start: int, end: int) -> Tuple[int, str, int, int]:
@@ -99,6 +136,7 @@ def extract_line_covering_match(full: str, start: int, end: int) -> Tuple[int, s
     line_txt = full[line_start:line_end].rstrip("\r\n")
     approx_lineno = full.count("\n", 0, line_start) + 1
     return approx_lineno, line_txt, line_start, line_end
+
 
 # ===== ページ単位の抽出 =====
 def judge_hits_in_page(page_text: str, ctx: int) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -154,6 +192,7 @@ def judge_hits_in_page(page_text: str, ctx: int) -> Tuple[List[Dict[str, Any]], 
             })
     return captions, refs
 
+
 # =========================
 # 全ページ走査
 # =========================
@@ -199,7 +238,7 @@ if df_captions.empty or "図表番号" not in df_captions.columns:
     st.info("図表番号の検査対象がありません（df_captions が空です）。")
     cont_rows, dup_rows = [], []
 else:
-    
+
     # 末尾の（任意ラベル + i/n）や（続き）を除去してタイトル本体にする
     def _title_base(s: str) -> str:
         if s is None:
@@ -221,7 +260,6 @@ else:
         if not m:
             return (None, None)
         return (int(m.group(1)), int(m.group(2)))
-
 
     def _is_continuation_group(g: pd.DataFrame) -> bool:
         """同図表キーの複数見出しが『続き』かを判定"""
@@ -246,7 +284,6 @@ else:
             return False
         return nums == list(range(min(nums), min(nums)+len(nums)))
 
-   
     # ---- グループ別に分類 ----
     cont_rows, dup_rows = [], []
     for k, g in df_captions.groupby("図表キー"):
@@ -257,7 +294,6 @@ else:
         if _is_continuation_group(g2):
             cont_rows.append({
                 "図表キー": k,
-                # ここを修正：すべての見出しタイトルを連結して出力
                 "図表タイトル": " | ".join([str(x) for x in g2["見出しタイトル"].fillna("").tolist()]),
                 "pdf頁一覧": ",".join([str(int(x)) for x in g2["pdf_page"].dropna().astype(int).tolist()]),
                 "頁ラベル一覧": ",".join([str(x) for x in g2["page_label"].fillna("").tolist()]),
@@ -273,7 +309,6 @@ else:
                 "備考": "（真の重複の可能性）"
             })
 
-
     # 画面表示
     if cont_rows:
         st.info("🔵 以下は **同番号の連続ページ** と判定しました（重複扱いしません）。")
@@ -287,7 +322,9 @@ else:
 
     # ---- 連番チェック（欠番/開始1でない）----
     def _numeric_core_from_key(key: str) -> str:
-        return re.sub(r"^(図表|図|表)", "", key)
+        # ★ base_key を通してから、「図表/図/表」プレフィックスを削る
+        s = base_key(key)
+        return re.sub(r"^(図表|図|表)", "", s)
 
     def _series_and_index(key: str) -> Tuple[str, Optional[int], str]:
         m = re.match(r"^(図表|図|表)", key)
@@ -302,6 +339,7 @@ else:
         except Exception:
             idx = None
         return series, idx, kind
+
 
     from collections import defaultdict
     series_map = defaultdict(list)  # (kind, series) -> [(idx, key, pdf), ...]
@@ -353,35 +391,57 @@ else:
 st.subheader("🔗 本文中の 図/表/図表 参照（excerpt付）")
 st.dataframe(df_refs, use_container_width=True)
 
+
+
 # =========================
 # 突き合わせ：図表見出し ↔ 本文参照
 # =========================
-def _index_pages_by_key(df: pd.DataFrame, key_col: str = "図表キー") -> dict:
-    from collections import defaultdict
-    idx = defaultdict(set)
-    if df is None or df.empty or key_col not in df.columns:
-        return {}
-    for _, row in df.iterrows():
-        k = row.get(key_col)
-        p = row.get("pdf_page")
-        if pd.notna(k) and pd.notna(p):
-            try:
-                idx[str(k)].add(int(p))
-            except Exception:
-                pass
-    return {k: sorted(v) for k, v in idx.items()}
+cap_idx = index_pages_by_key(df_captions)  # 図表キー → pdf_page 一覧
+ref_idx = index_pages_by_key(df_refs)
 
-cap_idx = _index_pages_by_key(df_captions)
-ref_idx = _index_pages_by_key(df_refs)
+# ① フルの図表キー集合（DataFrame からダイレクトに取得）
+cap_keys_full: set[str] = set()
+ref_keys_full: set[str] = set()
+if not df_captions.empty and "図表キー" in df_captions.columns:
+    cap_keys_full = set(df_captions["図表キー"].dropna().astype(str))
+if not df_refs.empty and "図表キー" in df_refs.columns:
+    ref_keys_full = set(df_refs["図表キー"].dropna().astype(str))
 
-cap_keys = set(cap_idx.keys())
-ref_keys = set(ref_idx.keys())
+# ② ベースキー集合（(1/3) だけ落としたもの）
+cap_base_keys = {base_key(k) for k in cap_keys_full}
+ref_base_keys = {base_key(k) for k in ref_keys_full}
 
-missing_in_refs = sorted(cap_keys - ref_keys)        # 見出しはあるが参照がない
-missing_in_captions = sorted(ref_keys - cap_keys)    # 参照はあるが見出しがない
+#############################################
+# --- 未引用チェック（見出し側） ---
+#   ・見出しのフルキー k が本文で一度も出てこない
+#   ・またはベースキーでもマッチしない
+#############################################
+missing_in_refs = sorted(
+    k for k in cap_keys_full
+    if not (
+        (k in ref_keys_full)              # 完全一致引用あり
+        or (base_key(k) in ref_base_keys) # ベースキー一致で引用あり（表3.1.5-1(1/3) vs 表3.1.5-1）
+    )
+)
+
+#############################################
+# --- 見出しなし参照（本文側） ---
+#   ・本文のフルキー k に対応する見出しがない
+#   ・ただしベースキー一致で見出しがあれば OK
+#############################################
+missing_in_captions = sorted(
+    k for k in ref_keys_full
+    if not (
+        (k in cap_keys_full)              # 完全一致で見出しあり
+        or (base_key(k) in cap_base_keys) # ベースキー一致で見出しあり
+    )
+)
 
 all_captions_referenced  = (len(missing_in_refs) == 0)
 has_refs_without_caption = (len(missing_in_captions) > 0)
+
+
+
 
 st.subheader("🔎 突き合わせ結果（見出し ↔ 参照）")
 
@@ -390,27 +450,15 @@ with c1:
     st.markdown("**① 全ての図表見出しが本文で引用されているか？**")
     st.write("→ **{}**".format("はい（全て引用あり）✅" if all_captions_referenced else "いいえ（未引用あり）⚠️"))
 with c2:
-    st.markdown("**② 本文に参照があるが見出しが無いものはあるか？**")
-    st.write("→ **{}**".format("はい（見出しなしの参照あり）⚠️" if has_refs_without_caption else "いいえ（全て見出しあり）✅"))
+    st.markdown("**② 本文に参照があるが見出しが無いものはないか？**")
+    st.write("→ **{}**".format(
+        "はい（全て見出しあり）✅" if not has_refs_without_caption else "いいえ（見出しなしの参照あり）⚠️"
+    ))
 
-# 画面表示用：引用されている見出し
-def _ref_aggregate_for_view(df_refs: pd.DataFrame):
-    if df_refs is None or df_refs.empty:
-        return {}, {}, {}, {}
-    ref_lbls, ref_pdfs, ref_texts, ref_hi = {}, {}, {}, {}
-    for k, grp in df_refs.groupby("図表キー"):
-        grp2 = grp.sort_values(["pdf_page", "行番号"], kind="mergesort")
-        lbls = grp2["page_label"].dropna().astype(str).unique().tolist()
-        pnums = grp2["pdf_page"].dropna().astype(int).unique().tolist()
-        texts = grp2["行テキスト"].dropna().astype(str).unique().tolist()
-        his   = grp2["行テキスト(強調)"].dropna().astype(str).unique().tolist()
-        ref_lbls[k] = ",".join(lbls)
-        ref_pdfs[k] = ",".join(str(x) for x in pnums)
-        ref_texts[k] = " | ".join(texts)
-        ref_hi[k]    = " | ".join(his)
-    return ref_lbls, ref_pdfs, ref_texts, ref_hi
 
-ref_lbls, ref_pdfs, ref_texts, ref_hi = _ref_aggregate_for_view(df_refs)
+# 画面表示用：参照情報をベースキーで集約
+ref_lbls, ref_pdfs, ref_texts, ref_hi = ref_aggregate_for_view(df_refs, base_key_func=base_key)
+
 
 def _first_caption_row(df_cap: pd.DataFrame, key: str):
     grp = df_cap[df_cap["図表キー"] == key]
@@ -423,26 +471,37 @@ def _first_caption_row(df_cap: pd.DataFrame, key: str):
         "pdf頁": int(row.get("pdf_page")) if pd.notna(row.get("pdf_page")) else 10**9,
     }
 
-referenced_keys = sorted(set(cap_idx.keys()) & set(ref_idx.keys()))
+
+# ベースキーが参照側に存在する図表キーを「引用されている見出し」とみなす
+ref_base_keys_view = set(ref_lbls.keys())
+referenced_keys = sorted(
+    k for k in cap_idx.keys()
+    if base_key(k) in ref_base_keys_view
+)
+
 rows = []
 for k in referenced_keys:
     ci = _first_caption_row(df_captions, k)
+    bk = base_key(k)
     rows.append({
         "図表キー": k,
         "図表タイトル": ci["図表タイトル"],
         "頁": ci["頁"],
         "pdf頁": ci["pdf頁"],
-        "参照頁ラベル": ref_lbls.get(k, ""),
-        "参照pdf頁": ref_pdfs.get(k, ""),
-        "参照テキスト": ref_texts.get(k, ""),
-        "参照テキスト(強調)": ref_hi.get(k, ""),
+        "参照頁ラベル": ref_lbls.get(bk, ""),
+        "参照pdf頁": ref_pdfs.get(bk, ""),
+        "参照テキスト": ref_texts.get(bk, ""),
+        "参照テキスト(強調)": ref_hi.get(bk, ""),
         "_sort": ci["pdf頁"],
     })
 
 df_referenced_view = (
     pd.DataFrame(
         rows,
-        columns=["図表キー","図表タイトル","頁","pdf頁","参照頁ラベル","参照pdf頁","参照テキスト","参照テキスト(強調)","_sort"]
+        columns=[
+            "図表キー", "図表タイトル", "頁", "pdf頁",
+            "参照頁ラベル", "参照pdf頁", "参照テキスト", "参照テキスト(強調)", "_sort"
+        ]
     )
     .sort_values("_sort", kind="mergesort")
     .drop(columns=["_sort"])
@@ -470,10 +529,7 @@ st.dataframe(df_orphan_refs, use_container_width=True)
 # =========================
 with st.sidebar:
     st.markdown("### CSV ダウンロード")
-    def _protect_for_excel_csv(x: object) -> object:
-        if isinstance(x, str) and re.match(r"^\s*\d{1,2}\s*[-−ー－―]\s*\d{1,2}\s*$", x.strip()):
-            return f'="{x.strip()}"'
-        return x
+
     for df, name in [
         (df_per_page_labels, "per_page_labels.csv"),
         (df_captions, "figure_table_captions.csv"),
@@ -482,101 +538,84 @@ with st.sidebar:
         if not df.empty:
             df2 = df.copy()
             if "page_label" in df2.columns:
-                df2["page_label"] = df2["page_label"].map(_protect_for_excel_csv)
+                df2["page_label"] = df2["page_label"].map(protect_for_excel_csv)
             buf = io.StringIO()
             df2.to_csv(buf, index=False)
-            st.download_button(f"📥 {name}",
-                               data=buf.getvalue().encode("utf-8-sig"),
-                               file_name=name,
-                               mime="text/csv",
-                               use_container_width=True)
+            st.download_button(
+                f"📥 {name}",
+                data=buf.getvalue().encode("utf-8-sig"),
+                file_name=name,
+                mime="text/csv",
+                use_container_width=True,
+            )
 
 # =========================
 # XLSX（突き合わせ＋重複/続き）ダウンロード
 # =========================
 from io import BytesIO
 
-def _caption_info_first_by_key(df: pd.DataFrame) -> dict:
-    info = {}
-    if df is None or df.empty:
-        return info
-    for k, grp in df.groupby("図表キー"):
-        row = grp.sort_values("pdf_page").iloc[0]
-        info[str(k)] = {
-            "図表タイトル": row.get("見出しタイトル", "") or "",
-            "頁": row.get("page_label", "") or "",
-            "pdf頁": int(row.get("pdf_page")) if pd.notna(row.get("pdf_page")) else "",
-        }
-    return info
+cap_info = caption_info_first_by_key(df_captions, df_per_page_labels)
+ref_page_labels, ref_pdf_pages, ref_texts, ref_highlight_texts = aggregate_ref_info(
+    df_refs,
+    base_key_func=base_key,
+)
 
-def _protect_for_excel(x: object) -> object:
-    if isinstance(x, str) and re.match(r"^\s*\d{1,2}\s*[-−ー－―]\s*\d{1,2}\s*$", x.strip()):
-        return f'=\"{x.strip()}\"'
-    return x
+# XLSX 用の referenced_keys もベースキーで判定
+ref_base_keys_x = set(ref_page_labels.keys())
+referenced_keys_x = sorted(
+    k for k in cap_idx.keys()
+    if base_key(k) in ref_base_keys_x
+)
 
-# 参照側情報集約
-def _aggregate_ref_info(df_refs: pd.DataFrame):
-    if df_refs is None or df_refs.empty:
-        return {}, {}, {}, {}
-    ref_page_labels, ref_pdf_pages, ref_texts, ref_highlight_texts = {}, {}, {}, {}
-    for k, grp in df_refs.groupby("図表キー"):
-        grp2 = grp.sort_values(["pdf_page", "行番号"], na_position="last", kind="mergesort")
-        labels = [str(x) for x in grp2["page_label"].dropna().unique().tolist()]
-        pdfs = [str(int(x)) for x in grp2["pdf_page"].dropna().unique().tolist()]
-        ref_page_labels[k] = ",".join(labels)
-        ref_pdf_pages[k] = ",".join(pdfs)
-        ref_texts[k] = " | ".join(grp2["行テキスト"].dropna().astype(str).unique().tolist())
-        ref_highlight_texts[k] = " | ".join(grp2["行テキスト(強調)"].dropna().astype(str).unique().tolist())
-    return ref_page_labels, ref_pdf_pages, ref_texts, ref_highlight_texts
+df_referenced_captions_x = make_crosscheck_rows(
+    referenced_keys_x,
+    caption_src=True,
+    cap_info=cap_info,
+    ref_page_labels=ref_page_labels,
+    ref_pdf_pages=ref_pdf_pages,
+    ref_texts=ref_texts,
+    ref_highlight_texts=ref_highlight_texts,
+    base_key_func=base_key,
+)
+df_missing_caption_refs_x = make_crosscheck_rows(
+    sorted(missing_in_refs),
+    caption_src=True,
+    cap_info=cap_info,
+    ref_page_labels=ref_page_labels,
+    ref_pdf_pages=ref_pdf_pages,
+    ref_texts=ref_texts,
+    ref_highlight_texts=ref_highlight_texts,
+    base_key_func=base_key,
+)
+df_orphan_refs_x = make_crosscheck_rows(
+    sorted(missing_in_captions),
+    caption_src=False,
+    cap_info=cap_info,
+    ref_page_labels=ref_page_labels,
+    ref_pdf_pages=ref_pdf_pages,
+    ref_texts=ref_texts,
+    ref_highlight_texts=ref_highlight_texts,
+    base_key_func=base_key,
+)
 
-cap_info = _caption_info_first_by_key(df_captions)
-ref_page_labels, ref_pdf_pages, ref_texts, ref_highlight_texts = _aggregate_ref_info(df_refs)
-
-def _make_rows(keys, caption_src=True):
-    rows = []
-    for k in keys:
-        ci = cap_info.get(k, {"図表タイトル": "", "頁": "", "pdf頁": ""}) if caption_src else {"図表タイトル": "", "頁": "", "pdf頁": ""}
-        rows.append({
-            "図表キー": k,
-            "図表タイトル": ci["図表タイトル"],
-            "頁": _protect_for_excel(ci["頁"]),
-            "pdf頁": ci["pdf頁"],
-            "参照頁ラベル": ref_page_labels.get(k, ""),
-            "参照pdf頁": ref_pdf_pages.get(k, ""),
-            "参照テキスト": ref_texts.get(k, ""),
-            "参照テキスト(強調)": ref_highlight_texts.get(k, ""),
-            "_sort_pdf": ci["pdf頁"] if caption_src and ci["pdf頁"] != "" else (
-                min([int(x) for x in ref_pdf_pages.get(k, "").split(",") if x.isdigit()] or [10**9])
-            ),
-        })
-    df = pd.DataFrame(rows, columns=[
-        "図表キー","図表タイトル","頁","pdf頁","参照頁ラベル","参照pdf頁","参照テキスト","参照テキスト(強調)","_sort_pdf"
-    ])
-    return df.sort_values("_sort_pdf", kind="mergesort").drop(columns=["_sort_pdf"], errors="ignore")
-
-referenced_keys = sorted(set(cap_idx.keys()) & set(ref_idx.keys()))
-df_referenced_captions_x = _make_rows(referenced_keys, caption_src=True)
-df_missing_caption_refs_x = _make_rows(sorted(missing_in_refs), caption_src=True)
-df_orphan_refs_x = _make_rows(sorted(missing_in_captions), caption_src=False)
-
-# 真の重複 & 続き判定のDF（上の計算結果をそのまま利用）
+# 真の重複 & 続き判定のDF
 dup_df = pd.DataFrame(dup_rows) if dup_rows else pd.DataFrame(
-    columns=["図表キー","見出しタイトル一覧","pdf頁一覧","頁ラベル一覧","備考"]
+    columns=["図表キー", "見出しタイトル一覧", "pdf頁一覧", "頁ラベル一覧", "備考"]
 )
 cont_df = pd.DataFrame(cont_rows) if cont_rows else pd.DataFrame(
-    columns=["図表キー","図表タイトル（本体）","pdf頁一覧","頁ラベル一覧","備考"]
+    columns=["図表キー", "図表タイトル（本体）", "pdf頁一覧", "頁ラベル一覧", "備考"]
 )
 
 with st.sidebar:
-    st.markdown("### 🔗 突き合わせ結果（XLSX）")
+    st.markdown("### 🔗 突き合わせ結果（xlsx）")
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         # サマリー
         pd.DataFrame({
-            "項目": ["全て引用済み", "見出しなし参照あり"],
+            "項目": ["全て引用済みか？", "見出しなしの参照はないか？"],
             "結果": [
                 "はい（全て引用あり）✅" if all_captions_referenced else "いいえ（未引用あり）⚠️",
-                "はい（見出しなし参照あり）⚠️" if has_refs_without_caption else "いいえ（全て見出しあり）✅",
+                "はい（見出しなし参照なし）✅" if not has_refs_without_caption else "いいえ（見出しなし参照あり）⚠️",
             ]
         }).to_excel(writer, sheet_name="サマリー", index=False)
 
@@ -585,22 +624,31 @@ with st.sidebar:
         df_missing_caption_refs_x.to_excel(writer, sheet_name="未引用見出し", index=False)
         df_orphan_refs_x.to_excel(writer, sheet_name="見出しなし参照", index=False)
 
-        # 重複/続き 判定 2 シート（ご要望追加）
+        # 重複/続き 判定 2 シート
         dup_df.to_excel(writer, sheet_name="重複（疑い）", index=False)
         cont_df.to_excel(writer, sheet_name="続き判定", index=False)
 
-        # 連番チェック（任意で出すなら）
+        # 連番チェック
         if 'start_rows' in locals():
-            (pd.DataFrame(start_rows) if start_rows else pd.DataFrame(columns=["種別","系列","開始番号","期待","存在番号"])
-             ).to_excel(writer, sheet_name="開始番号チェック", index=False)
+            (
+                pd.DataFrame(start_rows)
+                if start_rows else
+                pd.DataFrame(columns=["種別", "系列", "開始番号", "期待", "存在番号"])
+            ).to_excel(writer, sheet_name="開始番号チェック", index=False)
         if 'gap_rows' in locals():
-            (pd.DataFrame(gap_rows) if gap_rows else pd.DataFrame(columns=["種別","系列","欠番","存在番号"])
-             ).to_excel(writer, sheet_name="欠番チェック", index=False)
+            (
+                pd.DataFrame(gap_rows)
+                if gap_rows else
+                pd.DataFrame(columns=["種別", "系列", "欠番", "存在番号"])
+            ).to_excel(writer, sheet_name="欠番チェック", index=False)
+
+    base = uploaded.name.rsplit(".", 1)[0]
+    xlsx_filename = f"図表照合_{base}.xlsx"
 
     st.download_button(
-        "📘 突き合わせ結果（引用/未引用/見出しなし参照/重複/続き/連番）.xlsx をダウンロード",
+        "📘 突き合わせ結果をダウンロード",
         data=output.getvalue(),
-        file_name="figure_table_crosscheck.xlsx",
+        file_name=xlsx_filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )

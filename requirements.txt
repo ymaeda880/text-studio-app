@@ -34,8 +34,10 @@ janome
 
 plotly
 matplotlib
+japanize-matplotlib
 numpy
 kaleido
+mecab-python3
 
 # --- 実行環境補足 ---
 # macOSでは以下を brew でシステムにインストール

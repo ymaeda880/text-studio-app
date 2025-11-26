@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/67_レッドリスト_チェック.py
+# pages/80_レッドリスト_チェック.py
 from __future__ import annotations
 
 import io

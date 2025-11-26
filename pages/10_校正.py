@@ -1,4 +1,4 @@
-# pages/20_校正.py — 解析（校正方針：ページ/行/理由）オンリー極簡版
+# pages/10_校正.py — 解析（校正方針：ページ/行/理由）オンリー極簡版
 # ・原文は「1行=1行」を厳密保持してテーブル化（CJK折返し/長語ZWSP）
 # ・校正方針はMarkdown表をパースしてPDF/Word上の表に整形
 # ・ダウンロード形式は PDF または Word のどちらか（デフォルト PDF）
@@ -30,6 +30,9 @@ from lib.proofreading.prompts import (
     build_system_prompt,
 )
 
+from lib.proofreading.explanation import render_proof_policy_logic_expander
+
+
 # ------------------------------------------------------------
 # UI定数
 # ------------------------------------------------------------
@@ -43,8 +46,8 @@ LINES_PER_PAGE = 40  # 1ページあたりの表示行数
 # セッション初期化
 if "chat_model" not in st.session_state:
     st.session_state["chat_model"] = DEFAULT_MODEL
-if "proof_mode" not in st.session_state:
-    st.session_state["proof_mode"] = DEFAULT_MODE
+# if "proof_mode" not in st.session_state:
+#     st.session_state["proof_mode"] = DEFAULT_MODE
 
 # ------------------------------------------------------------
 # 表示ユーティリティ
@@ -312,7 +315,9 @@ def build_policy_pdf_bytes(
     # 列幅
     col_w = [14*mm, 14*mm, 18*mm]
     remain = text_width - sum(col_w)
-    col_w += [remain*0.36, remain*0.32, remain*0.32]
+    w_long = remain / 3
+    col_w += [w_long, w_long, w_long]
+    # col_w += [remain*0.36, remain*0.32, remain*0.32]
 
     def _p(s: str) -> Paragraph:
         return Paragraph((s or "").replace("\n", "<br/>"), styles["Body"])
@@ -367,18 +372,54 @@ def build_policy_pdf_bytes(
 # ------------------------------------------------------------
 # 解析（校正方針のみ）
 # ------------------------------------------------------------
+# def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str, extra: str) -> str:
+#     client = openai_client()
+#     md_tables: List[str] = []
+#     total_pages = (len(lines) + lines_per_page - 1) // lines_per_page
+
+#     # ★ ここだけ変更：モード＋追加プロンプトから System プロンプトを生成
+#     sys_inst_template = build_system_prompt(mode=mode, extra=extra)
+
+#     for pg in range(total_pages):
+#         start = pg * lines_per_page
+#         end = min((pg + 1) * lines_per_page, len(lines))
+#         page_chunk = [f"[{(i//lines_per_page)+1}:{(i%lines_per_page)+1:02d}] {lines[i]}" for i in range(start, end)]
+#         page_text = "\n".join(page_chunk)
+
+#         resp = client.chat.completions.create(
+#             model=model,
+#             messages=[
+#                 {"role": "system", "content": sys_inst_template},
+#                 {"role": "user", "content": f"次のテキスト（このページのみ）を解析してください：\n---\n{page_text}"},
+#             ],
+#         )
+#         md_tables.append(resp.choices[0].message.content.strip())
+
+#     out = []
+#     for i, tbl in enumerate(md_tables, 1):
+#         out.append(f"#### 頁 {i}\n\n{tbl}\n")
+#     return "\n".join(out)
+
 def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str, extra: str) -> str:
+    """
+    ページ単位で GPT から Markdown 表を取得し、
+    まとめて 1 個の大きな表（ヘッダー 1 回だけ）に組み直して返す。
+    """
     client = openai_client()
     md_tables: List[str] = []
     total_pages = (len(lines) + lines_per_page - 1) // lines_per_page
 
-    # ★ ここだけ変更：モード＋追加プロンプトから System プロンプトを生成
+    # System プロンプト
     sys_inst_template = build_system_prompt(mode=mode, extra=extra)
 
+    # --- 1) GPT にページごと投げて Markdown 表を集める ---
     for pg in range(total_pages):
         start = pg * lines_per_page
         end = min((pg + 1) * lines_per_page, len(lines))
-        page_chunk = [f"[{(i//lines_per_page)+1}:{(i%lines_per_page)+1:02d}] {lines[i]}" for i in range(start, end)]
+        page_chunk = [
+            f"[{(i // lines_per_page) + 1}:{(i % lines_per_page) + 1:02d}] {lines[i]}"
+            for i in range(start, end)
+        ]
         page_text = "\n".join(page_chunk)
 
         resp = client.chat.completions.create(
@@ -390,10 +431,51 @@ def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str,
         )
         md_tables.append(resp.choices[0].message.content.strip())
 
-    out = []
-    for i, tbl in enumerate(md_tables, 1):
-        out.append(f"#### 頁 {i}\n\n{tbl}\n")
-    return "\n".join(out)
+    # --- 2) まとめてパースして items にする ---
+    raw_md = "\n\n".join(md_tables)
+    items = _parse_plan_md_tables(raw_md)
+
+    # ✅ ヘッダーそっくりな行（頁/行/重要度/原文/修正案/理由）を除外する
+    def _is_header_like(row: Dict[str, str]) -> bool:
+        def norm(s: str) -> str:
+            return (s or "").strip().lower()
+
+        return (
+            norm(row.get("頁", "")) in {"頁", "page", "ページ"} and
+            norm(row.get("行", "")) in {"行", "line"} and
+            norm(row.get("重要度", "")) in {"重要度", "issue", "問題点"} and
+            norm(row.get("原文", "")) in {"原文", "original"} and
+            norm(row.get("修正案", "")) in {"修正案", "suggestion", "提案"} and
+            norm(row.get("理由", "")) in {"理由", "reason", "根拠"}
+        )
+
+    items = [row for row in items if not _is_header_like(row)]
+
+    # --- 3) items から「ヘッダー1回だけの Markdown 表」を再構築 ---
+    def esc_cell(s: str) -> str:
+        s = (s or "").replace("|", r"\|")
+        s = s.replace("\n", "<br>")
+        return s
+
+
+    header = "| 頁 | 行 | 重要度 | 原文 | 修正案 | 理由 |"
+    sep    = "| --- | --- | --- | --- | --- | --- |"
+
+    rows = [header, sep]
+    for it in items:
+        rows.append(
+            "| {page} | {line} | {imp} | {orig} | {sugg} | {reason} |".format(
+                page=esc_cell(it.get("頁", "")),
+                line=esc_cell(it.get("行", "")),
+                imp=esc_cell(it.get("重要度", "")),
+                orig=esc_cell(it.get("原文", "")),
+                sugg=esc_cell(it.get("修正案", "")),
+                reason=esc_cell(it.get("理由", "")),
+            )
+        )
+
+    # この文字列が HTML プレビュー用 plan_md かつ PDF 解析用のソースになる
+    return "\n".join(rows)
 
 
 # ------------------------------------------------------------
@@ -405,6 +487,8 @@ st.caption(
     "校正にはAIを使用していますので，個人情報や機密文書の取り扱いには注意してください。"
 )
 st.write("本文を入力して **① 解析** を実行すると、ページ/行/理由つきの校正方針（Markdown表）を生成します。")
+
+render_proof_policy_logic_expander()
 
 # 1) 初期化（最初の1回だけ）
 if "chat_model" not in st.session_state:
@@ -533,7 +617,7 @@ if src_text:
         st.markdown("### ⤵️ 解析レポートをダウンロード")
         numbered_preview = render_preview_with_numbers(lines, LINES_PER_PAGE)
         file_base = (used_file_name or "pasted_text").rsplit(".", 1)[0]
-        file_stub = f"policy_{file_base}"
+        file_stub = f"校正結果_{file_base}"
 
         if dl_choice_key == "pdf":
             pdf_bytes = build_policy_pdf_bytes(

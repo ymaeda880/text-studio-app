@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# lib/toc_segments.py
+# lib/toc_check/toc_segments.py
 """
 目次チェック用のコア関数群
 - PDF→ページ別テキスト化
@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 import re
 
-from .text_normalizer import (
+from ..text_normalizer import (
     z2h_numhy, normalize_strict, normalize_loose,
     HY, LEADERS_SPACED,
 )
@@ -70,16 +70,94 @@ def build_label_line_regex_mixed() -> re.Pattern:
 LABEL_TAIL_RE = build_label_tail_regex_mixed()
 LABEL_LINE_RE = build_label_line_regex_mixed()
 
+# ==== ページラベル専用の行判定（優先順位付きで使う） ====
+NUM = r"[0-9０-９]{1,6}"
+
+# 1) 単独数字（例：1, 12）
+PAGE_SINGLE_RE = re.compile(
+    rf"^\s*(?:p(?:age)?\.?\s*)?(?P<label>{NUM})\s*$"
+)
+
+# 2) 括弧付き単独数字（例：(3), （10））
+PAGE_PAREN_RE = re.compile(
+    rf"^\s*(?:p(?:age)?\.?\s*)?[（(]\s*(?P<label>{NUM})\s*[）)]\s*$"
+)
+
+# 3) 連番区間（例：3-4, ３－４）
+PAGE_RANGE_RE = re.compile(
+    rf"^\s*(?:p(?:age)?\.?\s*)?(?P<label>{NUM}\s*{HY}\s*{NUM})\s*$"
+)
+
+
 def extract_single_page_label(page_text: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    1ページ分のテキストから「頁ラベル」を 1 個だけ推定して返す。
+    探索対象は「上から 2 行のみ」（Word のページ番号が PDF の先頭付近に来る想定）。
+
+    優先順位：
+      1) 単独数字       （例：1, 12）
+      2) 括弧付き単独数 （例：(3), （10））
+      3) 連番区間       （例：3-4, ３－４）
+
+    上から 2 行以内でいずれも見つからない場合は (None, None) を返す。
+    戻り値:
+      (正規化したラベル, 元の行テキスト)
+    """
     if not page_text:
         return None, None
-    for raw in page_text.replace("\r\n","\n").replace("\r","\n").split("\n"):
-        s = normalize_strict(raw)
-        if not s: 
+
+    # 改行正規化
+    lines_raw = page_text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    # normalize_strict をかけたものも併せて持っておく
+    lines_norm = [normalize_strict(raw) for raw in lines_raw]
+
+    # 先頭 2 行だけを見る
+    limit = min(2, len(lines_raw))
+    top_raw = lines_raw[:limit]
+    top_norm = lines_norm[:limit]
+
+    def _scan_top_two(pattern: re.Pattern) -> Tuple[Optional[str], Optional[str]]:
+        """
+        ページ上側の 1〜2 行だけを対象に pattern にマッチする行を探す。
+        見つかったら (ラベル, 元行) を返す。
+        """
+        for raw, s in zip(top_raw, top_norm):
+            if not s:
+                continue
+            m = pattern.match(s)
+            if not m:
+                continue
+            label_raw = m.group("label")
+            # 数字・ハイフンを正規化（全角→半角，ハイフン統一など）
+            label = z2h_numhy(label_raw).strip()
+            if label:
+                return label, raw
+        return None, None
+
+    # 1) 単独数字（上から 2 行のみ）
+    label, line = _scan_top_two(PAGE_SINGLE_RE)
+    if label is not None:
+        return label, line
+
+    # 2) 括弧付き単独数字（上から 2 行のみ）
+    label, line = _scan_top_two(PAGE_PAREN_RE)
+    if label is not None:
+        return label, line
+
+    # 3) 連番区間（上から 2 行のみ）
+    label, line = _scan_top_two(PAGE_RANGE_RE)
+    if label is not None:
+        return label, line
+
+    # 4) フォールバック：従来の LABEL_LINE_RE ロジック（これも 2 行までに限定）
+    for raw, s in zip(top_raw, top_norm):
+        if not s:
             continue
         m = LABEL_LINE_RE.match(s)
         if m:
             return z2h_numhy(m.group("label")), raw
+
+    # 先頭 2 行に何もなければラベルなし扱い
     return None, None
 
 
