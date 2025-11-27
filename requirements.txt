@@ -31,7 +31,6 @@ reportlab
 
 janome
 
-
 plotly
 matplotlib
 japanize-matplotlib
