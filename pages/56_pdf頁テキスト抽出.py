@@ -30,17 +30,20 @@ except Exception:
 # ページ設定 & メインUI
 # =========================
 st.set_page_config(
-    page_title="📄 PDF 頁テキスト表示",
+    page_title="📄 PDF 頁テキスト抽出",
     page_icon="📄",
     layout="wide",
 )
 
-st.title("📄 PDF 頁テキスト表示")
-st.caption(
-    "PDF のテキスト層からテキストを抽出し，ページごとに区切って表示します．"
-    "（OCR は行いません．画像だけのPDFは空になる場合があります．）"
+st.title("📄 PDF 頁テキスト抽出")
+st.markdown(
+    """
+PDF のテキスト層からテキストを抽出し，ページごとに区切って表示します．<br>
+（OCR は行いません．画像だけのPDFは空になる場合があります．）<br>
+PDFから抽出した**テキストをそのまま**表示します．加工は行っていません．
+    """,
+    unsafe_allow_html=True
 )
-
 uploaded = st.file_uploader("PDF をアップロード", type=["pdf"])
 run = st.button("▶ ページごとのテキストを表示", type="primary", use_container_width=True)
 

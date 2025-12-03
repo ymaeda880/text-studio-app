@@ -66,14 +66,8 @@ def display_pdf_bytes(data: bytes, height: int = 600):
 def to_numbered_lines(raw: str) -> List[str]:
     return raw.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
-# def render_preview_with_numbers(lines: List[str], lines_per_page: int) -> str:
-#     return "\n".join(f"[{(i//lines_per_page)+1}:{(i%lines_per_page)+1:02d}] {t}" for i, t in enumerate(lines))
-
 def render_preview_with_numbers(lines: List[str], lines_per_page: int) -> str:
-    return "\n".join(
-        f"[{i+1:04d}] {t}"
-        for i, t in enumerate(lines)
-    )
+    return "\n".join(f"[{(i//lines_per_page)+1}:{(i%lines_per_page)+1:02d}] {t}" for i, t in enumerate(lines))
 
 # ------------------------------------------------------------
 # OpenAIクライアント
@@ -130,7 +124,7 @@ def _parse_plan_md_tables(md: str) -> List[Dict[str, str]]:
 
     def _row_to_dict(ln: str, cols_jp: List[str]) -> Dict[str, str] | None:
         cells = [c.strip() for c in ln.strip("|").split("|")]
-        if len(cells) < 3:
+        if len(cells) < len(cols_jp):
             return None
         row = dict(zip(cols_jp, cells[:len(cols_jp)]))
         for k in expected:
@@ -312,25 +306,21 @@ def build_policy_pdf_bytes(
 
     # 校正方針テーブル
     items = _parse_plan_md_tables(plan_md)
-    headers = ["行", "重要度", "原文", "修正案", "理由"]
+    headers = ["頁", "行", "重要度", "原文", "修正案", "理由"]
     table_data = [headers] + [[
-        it.get("行",""), it.get("重要度",""),
+        it.get("頁",""), it.get("行",""), it.get("重要度",""),
         it.get("原文",""), it.get("修正案",""), it.get("理由","")
     ] for it in items]
 
     # 列幅
-    #   行: 14mm
-    #   重要度: 18mm
-    #   残りを「原文 30% / 修正案 30% / 理由 40%」に配分して「理由」を広めに
-    col_w = [14 * mm, 18 * mm]
+    col_w = [14*mm, 14*mm, 18*mm]
     remain = text_width - sum(col_w)
-    col_w += [remain * 0.30, remain * 0.30, remain * 0.40]
+    w_long = remain / 3
+    col_w += [w_long, w_long, w_long]
+    # col_w += [remain*0.36, remain*0.32, remain*0.32]
 
     def _p(s: str) -> Paragraph:
-        s = (s or "")
-        s = s.replace("<br>", "<br/>").replace("<br />", "<br/>")
-        s = s.replace("\n", "<br/>")
-        return Paragraph(s, styles["Body"])
+        return Paragraph((s or "").replace("\n", "<br/>"), styles["Body"])
 
     table_para = [table_data[0]] + [[_p(x) for x in r] for r in table_data[1:]]
     tbl = Table(table_para, colWidths=col_w, repeatRows=1)
@@ -339,8 +329,7 @@ def build_policy_pdf_bytes(
     grid = colors.Color(0.75, 0.78, 0.85)
     st_cmds = [
         ("BACKGROUND", (0, 0), (-1, 0), header_bg),
-        # ★ 中央寄せは「行」「重要度」の2列だけ
-        ("ALIGN", (0, 0), (1, -1), "CENTER"),
+        ("ALIGN", (0, 0), (2, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("FONTNAME", (0, 0), (-1, -1), font_name),
         ("FONTSIZE", (0, 0), (-1, -1), 9.5),
@@ -427,12 +416,8 @@ def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str,
     for pg in range(total_pages):
         start = pg * lines_per_page
         end = min((pg + 1) * lines_per_page, len(lines))
-        # page_chunk = [
-        #     f"[{(i // lines_per_page) + 1}:{(i % lines_per_page) + 1:02d}] {lines[i]}"
-        #     for i in range(start, end)
-        # ]
         page_chunk = [
-            f"[{(i + 1):04d}] {lines[i]}"
+            f"[{(i // lines_per_page) + 1}:{(i % lines_per_page) + 1:02d}] {lines[i]}"
             for i in range(start, end)
         ]
         page_text = "\n".join(page_chunk)
@@ -469,18 +454,18 @@ def analyze_issues(model: str, lines: List[str], lines_per_page: int, mode: str,
     # --- 3) items から「ヘッダー1回だけの Markdown 表」を再構築 ---
     def esc_cell(s: str) -> str:
         s = (s or "").replace("|", r"\|")
-        # 修正前: s = s.replace("\n", "<br>")
-        s = s.replace("\n", "<br/>")     # 修正後
+        s = s.replace("\n", "<br>")
         return s
 
 
-    header = "| 行 | 重要度 | 原文 | 修正案 | 理由 |"
-    sep    = "| --- | --- | --- | --- | --- |"
+    header = "| 頁 | 行 | 重要度 | 原文 | 修正案 | 理由 |"
+    sep    = "| --- | --- | --- | --- | --- | --- |"
 
     rows = [header, sep]
     for it in items:
         rows.append(
-            "| {line} | {imp} | {orig} | {sugg} | {reason} |".format(
+            "| {page} | {line} | {imp} | {orig} | {sugg} | {reason} |".format(
+                page=esc_cell(it.get("頁", "")),
                 line=esc_cell(it.get("行", "")),
                 imp=esc_cell(it.get("重要度", "")),
                 orig=esc_cell(it.get("原文", "")),
@@ -554,49 +539,11 @@ if "pasted_text" not in st.session_state:
 
 
 with tab_file:
-    # アップロードエリアを上に配置
-    up = st.file_uploader(
-        ".docx / .txt / .pdf をアップロード",
-        type=["docx", "txt", "pdf"]
-    )
-
-     # ← ここで少しだけ下にスペースを入れる
-    #st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
-
-
-    # モード＋ボタンを下で横並び
-    col_mode, col_btn = st.columns([1, 1])
-
-    with col_mode:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-                display:inline-block;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_btn:
-        do_analyze_file = st.button(
-            "① 解析（ファイル）",
-            type="primary",
-            use_container_width=True,
-            disabled=not up,
-            key="btn_analyze_file"
-        )
-
+    col_u, col_btn1 = st.columns([3, 1])
+    with col_u:
+        up = st.file_uploader(".docx / .txt / .pdf をアップロード", type=["docx", "txt", "pdf"])
+    with col_btn1:
+        do_analyze_file = st.button("① 解析（ファイル）", type="primary", use_container_width=True, disabled=not up, key="btn_analyze_file")
 
     if up:
         used_file_name = up.name
@@ -623,6 +570,7 @@ with tab_file:
                 st.error(str(e)); st.stop()
 
 with tab_paste:
+   
     pasted = st.text_area(
         "ここに本文を貼り付け",
         height=260,
@@ -630,37 +578,7 @@ with tab_paste:
         placeholder="ここに本文を貼り付けてください（改行は保持されます）。",
     )
 
-    col_mode2, col_btn2 = st.columns([1, 1])
-
-    with col_mode2:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                display:inline-block;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_btn2:
-        do_analyze_paste = st.button(
-            "① 解析（貼り付け）",
-            type="primary",
-            use_container_width=True,
-        )
-
-
+    do_analyze_paste = st.button("① 解析（貼り付け）", type="primary", use_container_width=True)
 
     if do_analyze_paste:
         if not pasted.strip():
@@ -693,97 +611,13 @@ if src_text:
             )
         st.success("解析が完了しました。ページ/行/理由つきで方針を表示します。")
         st.subheader("📋 校正方針（まず何をどう直すか）")
-        # st.markdown(plan_md, unsafe_allow_html=False)
-
-        from html import escape
-
-        def md_table_to_html(md: str) -> str:
-            lines = [ln.strip() for ln in md.splitlines() if ln.strip()]
-            rows = []
-
-            for ln in lines:
-                if not ln.startswith("|"):
-                    continue
-                cells = [c.strip() for c in ln.strip("|").split("|")]
-                rows.append(cells)
-
-            if not rows:
-                return "<p>（データなし）</p>"
-
-            # ヘッダー行
-            header = rows[0]
-            body = rows[2:] if len(rows) > 2 else []
-
-            # 列幅指定（理由列を 40%）
-            col_html = """
-                <colgroup>
-                    <col style="width:10%">
-                    <col style="width:10%">
-                    <col style="width:20%">
-                    <col style="width:20%">
-                    <col style="width:40%">   <!-- 理由列 -->
-                </colgroup>
-            """
-
-            html = "<table class='proof-table'>"
-            html += col_html
-
-            # ヘッダー
-            html += "<thead><tr>"
-            for h in header:
-                html += f"<th>{escape(h)}</th>"
-            html += "</tr></thead>"
-
-            # 本体
-            html += "<tbody>"
-            for r in body:
-                html += "<tr>"
-                for c in r:
-                    html += f"<td>{c}</td>"
-                html += "</tr>"
-            html += "</tbody>"
-
-            html += "</table>"
-            return html
-
-
-        # ここで HTML に変換
-        html_table = md_table_to_html(plan_md)
-
-        # CSS を適用
-        st.markdown("""
-        <style>
-        .proof-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .proof-table th, .proof-table td {
-            border: 1px solid #ccc;
-            padding: 6px;
-            vertical-align: top;
-        }
-        .proof-table th {
-            background: #e8edf7;
-            text-align: center;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-        st.markdown(html_table, unsafe_allow_html=True)
-
+        st.markdown(plan_md, unsafe_allow_html=False)
 
         # ▼▼ 解析レポートのダウンロード（PDF or Word） ▼▼
         st.markdown("### ⤵️ 解析レポートをダウンロード")
         numbered_preview = render_preview_with_numbers(lines, LINES_PER_PAGE)
-
         file_base = (used_file_name or "pasted_text").rsplit(".", 1)[0]
-
-        # ★ 解析モード名をファイル名用に整形
-        mode_label = st.session_state.get("proof_mode", "").replace(" ", "")
-        if mode_label:
-            file_stub = f"校正結果_{file_base}_[{mode_label}]"
-        else:
-            file_stub = f"校正結果_{file_base}"
+        file_stub = f"校正結果_{file_base}"
 
         if dl_choice_key == "pdf":
             pdf_bytes = build_policy_pdf_bytes(

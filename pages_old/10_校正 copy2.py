@@ -554,49 +554,11 @@ if "pasted_text" not in st.session_state:
 
 
 with tab_file:
-    # アップロードエリアを上に配置
-    up = st.file_uploader(
-        ".docx / .txt / .pdf をアップロード",
-        type=["docx", "txt", "pdf"]
-    )
-
-     # ← ここで少しだけ下にスペースを入れる
-    #st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
-
-
-    # モード＋ボタンを下で横並び
-    col_mode, col_btn = st.columns([1, 1])
-
-    with col_mode:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-                display:inline-block;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_btn:
-        do_analyze_file = st.button(
-            "① 解析（ファイル）",
-            type="primary",
-            use_container_width=True,
-            disabled=not up,
-            key="btn_analyze_file"
-        )
-
+    col_u, col_btn1 = st.columns([3, 1])
+    with col_u:
+        up = st.file_uploader(".docx / .txt / .pdf をアップロード", type=["docx", "txt", "pdf"])
+    with col_btn1:
+        do_analyze_file = st.button("① 解析（ファイル）", type="primary", use_container_width=True, disabled=not up, key="btn_analyze_file")
 
     if up:
         used_file_name = up.name
@@ -623,6 +585,7 @@ with tab_file:
                 st.error(str(e)); st.stop()
 
 with tab_paste:
+   
     pasted = st.text_area(
         "ここに本文を貼り付け",
         height=260,
@@ -630,37 +593,7 @@ with tab_paste:
         placeholder="ここに本文を貼り付けてください（改行は保持されます）。",
     )
 
-    col_mode2, col_btn2 = st.columns([1, 1])
-
-    with col_mode2:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                display:inline-block;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_btn2:
-        do_analyze_paste = st.button(
-            "① 解析（貼り付け）",
-            type="primary",
-            use_container_width=True,
-        )
-
-
+    do_analyze_paste = st.button("① 解析（貼り付け）", type="primary", use_container_width=True)
 
     if do_analyze_paste:
         if not pasted.strip():

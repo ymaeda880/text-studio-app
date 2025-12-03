@@ -88,18 +88,20 @@ PAGE_RANGE_RE = re.compile(
     rf"^\s*(?:p(?:age)?\.?\s*)?(?P<label>{NUM}\s*{HY}\s*{NUM})\s*$"
 )
 
-
 def extract_single_page_label(page_text: str) -> Tuple[Optional[str], Optional[str]]:
     """
     1ページ分のテキストから「頁ラベル」を 1 個だけ推定して返す。
-    探索対象は「上から 2 行のみ」（Word のページ番号が PDF の先頭付近に来る想定）。
 
-    優先順位：
-      1) 単独数字       （例：1, 12）
-      2) 括弧付き単独数 （例：(3), （10））
-      3) 連番区間       （例：3-4, ３－４）
-
-    上から 2 行以内でいずれも見つからない場合は (None, None) を返す。
+    探索方針：
+      - ページ先頭から順に，normalize_strict で見ても「中身が空」の行はスキップする
+      - 最初に「何か文字がある行」を見つけた位置を起点として，そこから最大3行分を見る
+      - その 1〜3 行の中で，
+          1) 単独数字       （例：1, 12）
+          2) 括弧付き単独数 （例：(3), （10））
+          3) 連番区間       （例：3-4, ３－４）
+        を優先的に探す
+      - 見つからなければ LABEL_LINE_RE でフォールバック
+      - それでも見つからなければ (None, None) を返す
     戻り値:
       (正規化したラベル, 元の行テキスト)
     """
@@ -111,14 +113,25 @@ def extract_single_page_label(page_text: str) -> Tuple[Optional[str], Optional[s
     # normalize_strict をかけたものも併せて持っておく
     lines_norm = [normalize_strict(raw) for raw in lines_raw]
 
-    # 先頭 2 行だけを見る
-    limit = min(2, len(lines_raw))
-    top_raw = lines_raw[:limit]
-    top_norm = lines_norm[:limit]
+    # ─────────────────────────────
+    # 先頭の「完全な空行」（スペースだけ等）をスキップ
+    # ─────────────────────────────
+    start = 0
+    while start < len(lines_norm) and not lines_norm[start].strip():
+        start += 1
 
-    def _scan_top_two(pattern: re.Pattern) -> Tuple[Optional[str], Optional[str]]:
+    if start >= len(lines_raw):
+        # ページ全体が空行だけ
+        return None, None
+
+    # ここから最大3行分だけをラベル候補として見る
+    limit = min(3, len(lines_raw) - start)
+    top_raw = lines_raw[start:start + limit]
+    top_norm = lines_norm[start:start + limit]
+
+    def _scan_top(pattern: re.Pattern) -> Tuple[Optional[str], Optional[str]]:
         """
-        ページ上側の 1〜2 行だけを対象に pattern にマッチする行を探す。
+        top_norm/top_raw の中から pattern にマッチする行を探す。
         見つかったら (ラベル, 元行) を返す。
         """
         for raw, s in zip(top_raw, top_norm):
@@ -134,22 +147,22 @@ def extract_single_page_label(page_text: str) -> Tuple[Optional[str], Optional[s
                 return label, raw
         return None, None
 
-    # 1) 単独数字（上から 2 行のみ）
-    label, line = _scan_top_two(PAGE_SINGLE_RE)
+    # 1) 単独数字
+    label, line = _scan_top(PAGE_SINGLE_RE)
     if label is not None:
         return label, line
 
-    # 2) 括弧付き単独数字（上から 2 行のみ）
-    label, line = _scan_top_two(PAGE_PAREN_RE)
+    # 2) 括弧付き単独数字
+    label, line = _scan_top(PAGE_PAREN_RE)
     if label is not None:
         return label, line
 
-    # 3) 連番区間（上から 2 行のみ）
-    label, line = _scan_top_two(PAGE_RANGE_RE)
+    # 3) 連番区間
+    label, line = _scan_top(PAGE_RANGE_RE)
     if label is not None:
         return label, line
 
-    # 4) フォールバック：従来の LABEL_LINE_RE ロジック（これも 2 行までに限定）
+    # 4) フォールバック：従来の LABEL_LINE_RE ロジック
     for raw, s in zip(top_raw, top_norm):
         if not s:
             continue
@@ -157,8 +170,9 @@ def extract_single_page_label(page_text: str) -> Tuple[Optional[str], Optional[s
         if m:
             return z2h_numhy(m.group("label")), raw
 
-    # 先頭 2 行に何もなければラベルなし扱い
+    # 見つからなければラベルなし扱い
     return None, None
+
 
 
 def extract_toc_lines(fulltext: str, limit: int) -> List[str]:

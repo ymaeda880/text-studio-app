@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/43_頁抽出.py
+# pages/43_頁抽出チェック.py
 #
 # 目的：
 #   lib/toc_check/toc_segments.py のロジックをそのまま利用して
