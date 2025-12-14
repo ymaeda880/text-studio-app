@@ -89,13 +89,7 @@ def parse_table_number_and_title(paragraph: Paragraph) -> Tuple[str | None, str]
     return table_number, title or raw_text
 
 
-
-def table_to_json(
-    tbl: Table,
-    caption_para: Paragraph | None,
-    *,
-    use_same_left_placeholder: bool = False,  # ← 追加
-) -> Dict[str, Any]:
+def table_to_json(tbl: Table, caption_para: Paragraph | None) -> Dict[str, Any]:
     """
     python-docx の Table を、GPT に投げやすい JSON に変換する。
 
@@ -109,10 +103,6 @@ def table_to_json(
         ...
       ]
     }
-
-    use_same_left_placeholder:
-      True の場合、同じ行内で同一の tc を共有するセルを
-      「横結合セルの続き」とみなし "<同左>" を入れる。
     """
     table_number = None
     title = ""
@@ -126,31 +116,11 @@ def table_to_json(
         title = ""
 
     cells: List[List[str]] = []
-
     for row in tbl.rows:
         row_values: List[str] = []
-
-        # 横結合検出用：1つ前のセルの tc を覚えておく
-        prev_tc = None
-
         for cell in row.cells:
-            tc = getattr(cell, "_tc", None)
             text = (cell.text or "").strip()
-
-            if (
-                use_same_left_placeholder
-                and prev_tc is not None
-                and tc is prev_tc
-            ):
-                # 横に結合されている同一 tc のセル → <同左>
-                row_values.append("<同左>")
-            else:
-                # 通常セル or 結合セルの先頭
-                row_values.append(text)
-
-            if use_same_left_placeholder:
-                prev_tc = tc
-
+            row_values.append(text)
         cells.append(row_values)
 
     return {

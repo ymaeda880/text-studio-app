@@ -45,16 +45,30 @@ st.caption("AIは使用していません．安心してpdfを丸ごとアップ
 # 👇 利用者向けのロジック説明（折りたたみ）
 render_numbering_logic_expander()
 
-uploaded = st.file_uploader("PDF をアップロード", type=["pdf"])
+uploaded = st.file_uploader("PDF をアップロード", type=None)
 run = st.button("▶ 解析を実行", type="primary", use_container_width=True)
+
+# --- 実行ボタンが押されていなければ何もしない ---
+if not run:
+    st.stop()
+
+# --- ファイル未アップロード ---
+if uploaded is None:
+    st.warning("PDF ファイル（.pdf）をアップロードしてください。")
+    st.stop()
+
+# --- 拡張子チェック（念のため：.pdf 以外ならエラー）---
+
+suffix = Path(uploaded.name).suffix.lower()
+if suffix != ".pdf":
+    st.error("PDF 以外のファイルがアップロードされました。PDF（.pdf）をドロップしてください。")
+    st.stop()
 
 with st.sidebar:
     st.markdown("### オプション")
     ctx_chars  = st.slider("参照の前後コンテキスト文字数（excerpt 用）", 10, 300, 60, 5)
     show_debug = st.checkbox("内部情報（デバッグ）を表示", value=False)
 
-if not uploaded or not run:
-    st.stop()
 
 # =========================
 # PDF → ページ別テキスト

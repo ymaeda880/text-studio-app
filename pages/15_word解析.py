@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/60_word解析.py
+# pages/15_word解析.py
 #
 # Word(.docx) をアップロードして内部構造をざっくり解析し、
 # - 本文 / 図 / 表 / 目次候補 / 見出し を分類
@@ -164,7 +164,12 @@ def build_intermediate_text(
 
             if cat == "table":
                 stats["table"] += 1
-                tbl_json = table_to_json(block, pending_table_caption)
+                tbl_json = table_to_json(
+                    block,
+                    pending_table_caption,
+                    use_same_left_placeholder=use_same_left_placeholder,
+                )
+
 
                 if simple_mode:
                     # 簡素モード：
@@ -275,6 +280,16 @@ with st.sidebar:
         "※ 見出しのスタイル（Heading 1〜 / 見出し 1〜）や、"
         "『第◯章』『◯◯の状況』のような短いラベル行を見出しとして検出します。"
     )
+
+        # --- 表の結合セル処理の選択 ---
+    merge_label = st.radio(
+        "結合セルの扱い",
+        options=["そのまま", "横結合セルを <同左> にする"],
+        index=1,
+        help="横方向に結合されているセルを <同左> で埋めることができます。",
+    )
+    use_same_left_placeholder = (merge_label == "横結合セルを <同左> にする")
+
 
 uploaded_file = st.file_uploader("Word ファイル（.docx）をアップロードしてください", type=["docx"])
 

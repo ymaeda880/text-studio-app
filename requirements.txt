@@ -38,6 +38,9 @@ numpy
 kaleido
 mecab-python3
 
+# gemini
+google-generativeai
+
 # --- 実行環境補足 ---
 # macOSでは以下を brew でシステムにインストール
 #   brew install tesseract

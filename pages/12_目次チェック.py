@@ -25,8 +25,11 @@ st.caption("AIは使用していません．安心してpdfを丸ごとアップ
 
 render_toc_logic_expander()
 
-uploaded = st.file_uploader("PDF をアップロード", type=["pdf"])
-c1, c2 = st.columns([1,1])
+# --- ファイルアップロード ---
+# type を外して、自前で PDF チェックする
+uploaded = st.file_uploader("PDF をアップロード", type=None)
+
+c1, c2 = st.columns([1, 1])
 with c1:
     toc_join_front = st.checkbox("目次抽出は冒頭10pを連結", value=True)
 with c2:
@@ -34,8 +37,25 @@ with c2:
 
 run = st.button("▶ 解析・照合を実行", type="primary", use_container_width=True)
 
-if not uploaded or not run:
+# --- ボタンが押されていなければ何もしない ---
+if not run:
     st.stop()
+
+# --- ファイル未アップロード ---
+if uploaded is None:
+    st.warning("先に PDF ファイル（.pdf）をアップロードしてください。")
+    st.stop()
+
+# --- 拡張子チェック（.pdf 以外はエラー）---
+# from pathlib import Path
+
+suffix = Path(uploaded.name).suffix.lower()
+if suffix != ".pdf":
+    st.error("PDF 以外のファイルがアップロードされました。このページは PDF（.pdf）専用です。")
+    st.stop()
+
+
+
 
 with tempfile.TemporaryDirectory() as td:
     pdf_path = Path(td) / "input.pdf"

@@ -59,25 +59,45 @@ def detect_heading_level(p: Paragraph) -> int:
 
 def is_heading_paragraph(p: Paragraph) -> bool:
     """
-    この段落を「見出し」とみなすかどうかを判定。
+    この段落を「見出し」とみなすかどうかを判定する。
 
-    - スタイル名に 'Heading' / '見出し' を含む
-    - あるいは「本文」というよりは短いラベルぽい行（句点がなくて40字以下）
+    以前の正しい動作のポイントを完全に再現：
+    - 図・表キャプションを heading にしない
+    - 「資料」「参考資料」「本文」スタイルは heading にしない
+    - Heading / 見出しスタイルは優先的に True
+    - 短文ラベル（句点なし & 40字以下）は見出し候補
+      ※ただし上記の除外条件を満たさない場合のみ
     """
     text = (p.text or "").strip()
     if not text:
         return False
 
     style_name = (p.style.name if p.style is not None else "") or ""
+
+    # --- 明確に見出しではないもの（以前は全部除外されていた） ---
+    if any(key in style_name for key in ["本文", "参考資料", "資料", "Normal"]):
+        return False
+
+    # 図表キャプションを除外（以前はここで除外されていた）
+    if re.match(r"^(表|図)\s*\d", text):
+        return False
+    if re.match(r"^(Table|Figure|Fig\.?)\s*\d", text, flags=re.IGNORECASE):
+        return False
+    if any(key in style_name for key in ["Caption", "キャプション", "図表番号", "Table", "Figure"]):
+        return False
+
+    # --- スタイルで heading が明示されている ---
     if "Heading" in style_name or "見出し" in style_name:
         return True
 
-    # 「岩手県は〜。」のような文章は本文扱いにしたいので、
-    # 句点「。」を含む場合は原則として見出し扱いしない。
+    # --- それ以外の簡易的なラベル判定 ---
     if "。" not in text and len(text) <= 40:
         return True
 
     return False
+
+
+
 
 
 def format_heading_id(base_chapter: int, counters: List[int], level: int) -> str:

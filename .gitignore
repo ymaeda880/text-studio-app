@@ -14,3 +14,7 @@ __pycache__/
 
 # データベース
 data/
+
+# text_studio のログ
+log_text_studio.txt
+

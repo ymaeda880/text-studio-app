@@ -71,3 +71,26 @@ def collect_images_as_zip(doc: Document) -> BytesIO:
                 zf.writestr(name, part.blob)
     buf.seek(0)
     return buf
+
+
+def paragraph_has_image(paragraph):
+    """
+    Word Paragraph 内に画像 (<w:drawing> or <w:pict>) があるか判定する
+    """
+    # docx の XML ノードを直接見る
+    element = paragraph._element
+
+    # drawing 要素を探す（Word 画像の基本パターン）
+    if element.xpath('.//w:drawing'):
+        return True
+
+    # pict 要素（古い Word 形式の画像）
+    if element.xpath('.//w:pict'):
+        return True
+
+    # a:blip があるか確認（画像の実体を指す r:embed）
+    if element.xpath('.//a:blip'):
+        return True
+
+    return False
+
