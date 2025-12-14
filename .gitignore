@@ -17,4 +17,4 @@ data/
 
 # text_studio のログ
 log_text_studio.txt
-
+log_*.txt
