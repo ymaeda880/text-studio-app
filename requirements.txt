@@ -40,6 +40,7 @@ mecab-python3
 
 # gemini
 google-generativeai
+google-genai
 
 # --- 実行環境補足 ---
 # macOSでは以下を brew でシステムにインストール

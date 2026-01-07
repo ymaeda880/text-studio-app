@@ -48,10 +48,41 @@ TRANSCRIBE_PRICES_USD_PER_MIN = {
 }
 
 # ============================================================
+# Prices (USD / 1M tokens) - Embeddings
+# ============================================================
+EMBEDDING_PRICES_USD = {
+    "text-embedding-3-small": 0.02,
+    "text-embedding-3-large": 0.13,
+    "text-embedding-ada-002": 0.10,  # レガシー
+}
+
+# ============================================================
+# Prices (USD / minute) - Audio
+# ============================================================
+WHISPER_PRICE_PER_MIN = 0.006
+
+AUDIO_PRICES_USD_PER_MIN = {
+    "whisper-1": WHISPER_PRICE_PER_MIN,
+}
+
+# もし “分単価” のモデル（OpenAI Transcribe系など）も扱うならここに集約
+TRANSCRIBE_PRICES_USD_PER_MIN = {
+    "gpt-4o-mini-transcribe": 0.0125,
+    "gpt-4o-transcribe":      0.025,
+    "whisper-1":              WHISPER_PRICE_PER_MIN,
+    # Gemini は「分単価」ではない想定
+}
+
+
+# ============================================================
 # 為替（USDJPY）
 # ============================================================
 DEFAULT_USDJPY = 150.0
 
+# ============================================================
+# Constants
+# ============================================================
+MILLION = 1_000_000
 
 # ============================================================
 # Gemini 用：トークン概算ユーティリティ

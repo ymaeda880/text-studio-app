@@ -1,4 +1,4 @@
-# pages/10_校正（Gemini）.py — 解析（校正方針：ページ/行/理由）オンリー極簡版
+# pages/10_文章校正（Gemini）.py — 解析（校正方針：ページ/行/理由）オンリー極簡版
 # ・原文は「1行=1行」を厳密保持してテーブル化（CJK折返し/長語ZWSP）
 # ・校正方針はMarkdown表をパースしてPDF/Word上の表に整形
 # ・ダウンロード形式は PDF または Word のどちらか（デフォルト PDF）
@@ -512,17 +512,29 @@ def analyze_issues(
     use_gemini = model.startswith("gemini")
 
     # Gemini 初期化（必要時のみ）
+    # if use_gemini:
+    #     if not GEMINI_ENABLED:
+    #         raise RuntimeError("GEMINI_API_KEY が未設定のため Gemini は利用できません。")
+    #     try:
+    #         import google as genai
+    #     except Exception as e:
+    #         raise RuntimeError("Gemini を使うには `pip install google-generativeai` が必要です。") from e
+    #     genai.configure(api_key=GEMINI_API_KEY)
+    #     gem = genai.GenerativeModel(model)
+
+    # Gemini 初期化（必要時のみ）: google-genai
     if use_gemini:
         if not GEMINI_ENABLED:
             raise RuntimeError("GEMINI_API_KEY が未設定のため Gemini は利用できません。")
         try:
-            import google.generativeai as genai
+            from google import genai
         except Exception as e:
-            raise RuntimeError("Gemini を使うには `pip install google-generativeai` が必要です。") from e
-        genai.configure(api_key=GEMINI_API_KEY)
-        gem = genai.GenerativeModel(model)
+            raise RuntimeError("Gemini を使うには `pip install google-genai` が必要です。") from e
+
+        gem_client = genai.Client(api_key=GEMINI_API_KEY)
     else:
         client = openai_client()
+
 
     # --- ページごとに解析 ---
     for pg in range(total_pages):
@@ -537,13 +549,21 @@ def analyze_issues(
                 f"次のテキスト（このページのみ）を解析してください：\n---\n{page_text}\n\n"
                 "出力は必ず Markdown の表（| 行 | 重要度 | 原文 | 修正案 | 理由 |）で返してください。"
             )
-            resp = gem.generate_content(prompt)
+
+            resp = gem_client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+
+            # テキスト取り出し（google-genai）
             out_text = (getattr(resp, "text", "") or "").strip()
             md_tables.append(out_text)
 
-            # Gemini usage（あれば usage_metadata を優先）
+            # usage（google-genai は resp.usage_metadata を持つことが多い）
             u = getattr(resp, "usage_metadata", None)
             if u is not None:
+                # フィールド名は環境差があるので get で安全に拾う
+                # （prompt_token_count / candidates_token_count / total_token_count が典型）
                 in_t = int(getattr(u, "prompt_token_count", 0) or 0)
                 out_t = int(getattr(u, "candidates_token_count", 0) or 0)
                 tot_t = int(getattr(u, "total_token_count", 0) or (in_t + out_t))
@@ -556,6 +576,9 @@ def analyze_issues(
             total_in_tokens += in_t
             total_out_tokens += out_t
             total_tokens += tot_t
+
+
+
 
         else:
             resp = client.chat.completions.create(
