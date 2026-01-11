@@ -2,10 +2,53 @@
 from __future__ import annotations
 import streamlit as st
 
+# ============================================================
+# パスの取得とcommon_lib読み込み（app.pyにおけるコード）
+# ============================================================
+from pathlib import Path
+import sys
+
+_THIS = Path(__file__).resolve()
+APP_ROOT = _THIS.parent
+APP_NAME = APP_ROOT.name                  # ← app_name を自動取得
+PROJECTS_ROOT = _THIS.parents[2]
+
+if str(PROJECTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECTS_ROOT))
+
+from common_lib.sessions import SessionConfig, init_session, heartbeat_tick
+from common_lib.auth.auth_helpers import require_login
+
+
 st.set_page_config(page_title="Text Studio", page_icon="✍️", layout="wide")
+# ============================================================
+# Session heartbeat（全ページ共通・app.py）
+# ============================================================
+SESSIONS_DB = (
+    PROJECTS_ROOT / "Storages" / "_admin" / "sessions" / "sessions.db"
+)
+CFG = SessionConfig()  # heartbeat=30s, TTL=120s（既定）
+
+# ───────────────── ログイン必須 ─────────────────
+
+sub = require_login(st)
+if not sub:
+    st.stop()
+
+# ───────────────── ヘッダ ─────────────────
+left, right = st.columns([2, 1])
+with left:
+    st.title("✍️ Text Studio — 文章を磨くAIスタジオ")
+with right:
+    st.success(f"✅ ログイン中: **{sub}**")
+
+user = sub
+
+# ───────────────── sessions（初期化 + heartbeat） ─────────────────
+init_session(db_path=SESSIONS_DB, cfg=CFG, user_sub=user, app_name=APP_NAME)
+heartbeat_tick(db_path=SESSIONS_DB, cfg=CFG, user_sub=user, app_name=APP_NAME)
 
 
-st.title("✍️ Text Studio — 文章を磨くAIスタジオ")
 st.caption("Check・Translate・Summarize・Refine — all in one workspace.")
 
 st.markdown(
