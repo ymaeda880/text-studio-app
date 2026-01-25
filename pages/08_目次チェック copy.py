@@ -16,12 +16,16 @@ from lib.toc_check.toc_segments import (
     check_toc_by_order,
 )
 from lib.toc_check.explanation import render_toc_logic_expander
+from common_lib.ui.banner_lines import render_banner_line_by_key
 
 
 st.set_page_config(page_title="📄 目次チェック（ローカル照合）", page_icon="📄", layout="wide")
 st.title("📄 目次チェック")
 st.caption("目次候補（目次タイトルと頁）を本文に対して **行ごとに順番に** 照合します。")
 st.caption("AIは使用していません．安心してpdfを丸ごとアップロードしてください．")
+st.caption("内部ではパターンマッチによる照合を行っています．"
+           "想定しないパターンには照合しないので結果が正しくないこともあります．"
+           "その際には**管理者に報告**してください．**プログラムの修正**を行います．")
 
 render_toc_logic_expander()
 

@@ -18,14 +18,27 @@ if str(PROJECTS_ROOT) not in sys.path:
 
 from common_lib.sessions import SessionConfig, init_session, heartbeat_tick
 from common_lib.auth.auth_helpers import require_login
+from common_lib.ui.banner_lines import render_banner_line_by_key
 
 
 st.set_page_config(page_title="Text Studio", page_icon="✍️", layout="wide")
 # ============================================================
-# Session heartbeat（全ページ共通・app.py）
+# バナー / ログイン（テンプレ準拠）
 # ============================================================
+render_banner_line_by_key("purple_light")
+
+# ------------------------------------------------------------
+# セッション設定（Storages 正本 API 経由）
+# ------------------------------------------------------------
+from common_lib.storage.storages_config import resolve_storages_root
+
+STORAGES_ROOT = resolve_storages_root(PROJECTS_ROOT)
+
 SESSIONS_DB = (
-    PROJECTS_ROOT / "Storages" / "_admin" / "sessions" / "sessions.db"
+    STORAGES_ROOT
+    / "_admin"
+    / "sessions"
+    / "sessions.db"
 )
 CFG = SessionConfig()  # heartbeat=30s, TTL=120s（既定）
 
@@ -54,7 +67,7 @@ st.caption("Check・Translate・Summarize・Refine — all in one workspace.")
 st.markdown(
     """
     **左サイドバーの項目**をクリックして各機能ページへ移動してください。  
-    まずは **校正** ページをお試しください。
+    まずは **文章校正** ページをお試しください。
     """
 )
 
@@ -73,17 +86,11 @@ st.markdown("""
 st.markdown("""
 ## 📝 校正アプリケーションについて
 
-**校正** アプリケーションは現在、**テキストを貼り付けて校正する方式**で動作していますが、  
-最終的には、**Wordファイル（.docx）をドロップするだけで**、
+**文章校正** アプリケーションは現在、**テキストを貼り付けて校正する方式**で動作していますが，
+この改良版では，**Wordファイル（.docx）をword解析にドロップし**、中間解析ファイルを作成し，
+inBoxへ保存すると，inBoxから文章校正へ入力できる統合型ツールになっています。
 
-- GPT が解釈可能な中間コードへ自動変換  
-- 適切な単位への自動分割  
-- 校正結果の一括生成  
-- PDF／Word への出力  
-
-までを **一度の操作で完了** できる統合型ツールを目指しています。
-
-まだ開発途中であり、ご不便をおかけする点も多いかと思いますが、  
+しかし，まだ開発途中であり、ご不便をおかけする点も多いかと思いますが、  
 皆様からの **積極的なご利用とフィードバック** が改善の大きな力になります。
 
 より良い校正アプリケーションを共に育てていくため、  

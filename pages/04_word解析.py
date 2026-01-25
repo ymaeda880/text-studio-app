@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/16_word解析（box対応）.py
+# pages/16_word解析.py
 #
 # Word(.docx) をアップロードして内部構造をざっくり解析し、
 # - 本文 / 図 / 表 / 目次候補 / 見出し を分類
@@ -83,6 +83,10 @@ from common_lib.inbox.inbox_common.types import (
     IngestFailed,
 )
 
+from lib.word_analysis.explanation import render_word_analysis_help_expander
+
+from common_lib.ui.ui_basics import subtitle
+from common_lib.ui.banner_lines import render_banner_line_by_key
 
 # =========================
 # 中間テキストの構築
@@ -403,6 +407,11 @@ st.set_page_config(
 )
 
 # ============================================================
+# バナー / ログイン（テンプレ準拠）
+# ============================================================
+render_banner_line_by_key("purple_light")
+
+# ============================================================
 # session_state keys（解析結果を rerun でも保持する）
 # ============================================================
 SS_TEXT = "word15_intermediate_text"
@@ -420,24 +429,21 @@ if not sub:
     st.stop()
 left, right = st.columns([2, 1])
 with left:
-    st.title("📄 Word 解析 → 生成AI入力用テキスト生成")
+    st.title("📄 Word 解析")
 with right:
     st.success(f"✅ ログイン中: **{sub}**")
 
 
-st.markdown(
-    """
-アップロードした Word(.docx) を解析して、**生成AIへの入力に使いやすい 1 つのテキスト**を作ります。
+subtitle("生成AI入力用テキスト生成")
 
-- 見出し: `=== HEADING[3-1-2] タイトル ===` のように章番号付きで明示  
-- 本文: そのままのテキスト  
-- 表: `=== TABLE 3.1.1-2 タイトル ===` の下に JSON を埋め込み  
-- 図: `=== FIGURE[1] キャプション ===` と画像ファイル名の列挙  
-- 画像: ZIP にまとめてダウンロード（/word/media/imageX.png 相当）
+st.caption("Word書類の文章校正を行う前処理として，Word書類をAIが読めるようにした中間テキストファイルを作成します．"
+           "inboxに対応していますので，作成された中間ファイルをinboxに保存して，文章校正に進むことができます．"
+           "Word書類の字数が多い時は，中間ファイルは30,000字程度に区切った複数のファイルが作成されます．")
 
-※ 表番号は、とりあえず **「3.1.1-2」形式** を復元するルールにしています。
-"""
-)
+st.caption("オプションは原則デフォルトで問題ありません．")
+
+render_word_analysis_help_expander()
+
 
 if not HAS_DOCX:
     st.error("python-docx がインポートできませんでした。`python-docx` をインストールしてください。")
@@ -446,6 +452,7 @@ if not HAS_DOCX:
 # --- サイドバー設定 ---
 with st.sidebar:
     st.header("🔧 オプション")
+    st.caption("「出力スタイル」は，続けて「文章校正」を行う時は「標準」で使用してくだい．")
 
     # 出力スタイル選択（簡素 / 標準 / 詳細）
     output_mode_label = st.radio(
@@ -467,6 +474,9 @@ with st.sidebar:
     else:
         output_mode = "detailed"
 
+    st.caption(
+            "「この章の章番号」は，1のまま使用してください"
+        )
     base_chapter = st.number_input(
         "この章の章番号 (base_chapter)",
         min_value=1,
@@ -477,8 +487,7 @@ with st.sidebar:
     )
 
     st.caption(
-        "※ 見出しのスタイル（Heading 1〜 / 見出し 1〜）や、"
-        "『第◯章』『◯◯の状況』のような短いラベル行を見出しとして検出します。"
+        "「結合セルの扱い」は，続けて「文章校正」を行う時は「横結合セルを<同左>にする」で使用してくだい．"
     )
 
     # --- 表の結合セル処理の選択 ---
@@ -491,6 +500,9 @@ with st.sidebar:
     use_same_left_placeholder = (merge_label == "横結合セルを <同左> にする")
 
      # --- Inboxへ送る時の分割上限（文字数）---
+    st.caption(
+        "「Inboxへ送る時の分割上限」は，続けて「文章校正」を行う時は30,000で使用してくだい．"
+    )
     chunk_char_limit = st.slider(
         "📏 Inbox送信用 分割上限（文字数）",
         min_value=10000,
@@ -575,7 +587,46 @@ c4.metric("図ブロック数", stats.get("figure", 0))
 st.markdown("---")
 
 st.subheader("📝 生成された中間テキスト（先頭部分プレビュー）")
-st.code(intermediate_text[:8000], language="text")  # 長くなりすぎないように頭だけ
+# ============================================================
+# 中間テキストのファイル名（以降で共通利用）
+# ============================================================
+txt_name = st.session_state.get(SS_TXT_NAME) or "intermediate.txt"
+
+
+st.code(intermediate_text[:3000], language="text")  # 長くなりすぎないように頭だけ
+
+st.markdown("---")
+
+# ============================================================
+# 分割後の「生成ファイル名（予定）」一覧（ダウンロード前に表示）
+# ============================================================
+chunks_preview = split_text_by_heading_markers(intermediate_text, int(chunk_char_limit))
+
+def _split_filename(name: str) -> tuple[str, str]:
+    if "." in name:
+        base, ext = name.rsplit(".", 1)
+        return base, "." + ext
+    return name, ""
+
+# 解析時に決めた txt_name をベースに「予定ファイル名」を作る
+base_fn_preview, ext_fn_preview = _split_filename(txt_name)
+
+planned_names: List[str] = []
+if chunks_preview:
+    total_preview = len(chunks_preview)
+    for idx in range(1, total_preview + 1):
+        if total_preview == 1:
+            fn = txt_name
+        else:
+            fn = f"{base_fn_preview}_part{idx:03d}{ext_fn_preview or '.txt'}"
+        planned_names.append(fn)
+
+    st.subheader("📄 生成された中間テキスト（分割後ファイル一覧）")
+    st.caption("※ 文字数上限と <ここから見出し> の直前を基準に分割した場合の、保存・運用上のファイル名一覧です。")
+    st.code("\n".join(planned_names), language="text")
+else:
+    st.subheader("📄 生成された中間テキスト（分割後ファイル一覧）")
+    st.caption("※ テキストが空のため、分割ファイルは生成されません。")
 
 st.markdown("---")
 
@@ -586,10 +637,6 @@ st.subheader("💾 ダウンロード")
 
 # --- 中間テキスト (.txt) ---
 buf_txt = intermediate_text.encode("utf-8")
-
-# ファイル名は解析時に session_state に保存したものを優先（rerun でも安定）
-txt_name = st.session_state.get(SS_TXT_NAME) or "intermediate.txt"
-
 
 st.download_button(
     label="⬇️ 中間テキスト（.txt）をダウンロード",
@@ -617,17 +664,6 @@ st.download_button(
     mime="application/zip",
 )
 
-
-st.markdown("---")
-st.subheader("📥 中間テキストを Inbox へ保存")
-
-# Inboxに保存するファイル名（初期値は txt_name）
-inbox_txt_name = st.text_input(
-    "Inboxに保存するファイル名（.txt）",
-    value=txt_name,
-    help="Inboxに保存されるファイル名です（.txt 推奨）",
-)
-
 # ★ rerunでも必ず定義されるようにここで再計算
 if output_mode == "simple":
     mode_jp = "簡素"
@@ -635,7 +671,6 @@ elif output_mode == "standard":
     mode_jp = "標準"
 else:
     mode_jp = "詳細"
-
 
 
 # tags / origin（運用で検索・追跡しやすくする）
@@ -652,22 +687,13 @@ origin = {
 if st.button("📥 中間テキストを Inbox に保存", type="primary"):
     try:
         # ★ 分割（<ここから見出し> の直前で切る）
-        chunks = split_text_by_heading_markers(intermediate_text, int(chunk_char_limit))
+        chunks = chunks_preview
 
         if not chunks:
             st.error("❌ 保存対象テキストが空です。")
             st.stop()
 
-        # ファイル名の作り方：
-        # - 1件ならそのまま inbox_txt_name
-        # - 複数なら _part001 のように連番を付ける
-        def _split_filename(name: str) -> tuple[str, str]:
-            if "." in name:
-                base, ext = name.rsplit(".", 1)
-                return base, "." + ext
-            return name, ""
-
-        base_fn, ext_fn = _split_filename(inbox_txt_name)
+        base_fn, ext_fn = _split_filename(txt_name)
 
         total = len(chunks)
         saved_names: List[str] = []
