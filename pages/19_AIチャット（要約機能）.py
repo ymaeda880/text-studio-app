@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/18_AIチャット.py
+# pages/19_AIチャット（要約機能）.py
 # ------------------------------------------------------------
 # 💬 AIチャット
 #
@@ -11,6 +11,14 @@
 # - tokens/cost は「返ってきた範囲」で br.set_usage / br.set_cost に反映（推計しない）
 # - cost 表示は common_lib.ai.costs.ui（計算しない）
 #
+# 追加機能（履歴縮約）：
+# - 概算トークン表示（文字数ベース）
+#   * 12,000超 → 🟡
+#   * 15,000超 → 🔴
+# - 方式A：✂️ 直近N件にカット（履歴そのものを削除）N=20
+# - 方式B：🧠 直近K件を残して、それ以前（過去＋過去要約）を1つに再要約 K=12
+#   * 要約は system メッセージとして先頭1件に固定
+#
 # UI方針：
 # - use_container_width は使わない
 # - st.form は使わない
@@ -21,11 +29,49 @@ from __future__ import annotations
 
 import json
 import sys
-from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
+
+# ============================================================
+# 履歴縮約パラメータ（変更しやすい：ここだけ触れば良い）
+#
+# ■ 目的
+# - チャット履歴が肥大化してトークン上限に近づくのを防ぐ
+# - ユーザー操作で「物理カット」または「要約縮約」を選べるようにする
+# - 警告表示（🟡/🔴）により、送信前に入力サイズを把握できるようにする
+#
+# ■ 設計方針
+# - 数値はすべて「UI・挙動調整用のパラメータ」としてここに集約
+# - ロジック側にはマジックナンバーを埋め込まない
+# - 変更時はこのブロックのみ修正すれば全体に反映される
+# ============================================================
+
+# 方式A：履歴を物理的に削除して、直近 N 件だけ残す
+# - 表示上も完全に消える
+# - トークン節約効果が最も高いが、過去文脈は失われる
+#CUT_N = 20
+CUT_N = 3
+
+# 方式B：直近 K 件を残し、それ以前の履歴を 1 件の system 要約に置き換える
+# - 文脈は維持されるが、要約分のトークンは常に含まれる
+# - KEEP_K は「ユーザーが直感的に覚えていられる会話量」を目安に設定
+# KEEP_K = 12
+KEEP_K = 3
+
+# 概算トークン数（入力：system + prompt）がこの値を超えたら警告表示（🟡）
+# - まだ送信は可能だが、要約・カットを検討すべき水準
+WARN_YELLOW = 12000
+
+# 概算トークン数（入力：system + prompt）がこの値を超えたら強い警告（🔴）
+# - モデル上限に近づいており、失敗・自動切り詰めのリスクが高い
+# - 履歴縮約を強く推奨する水準
+WARN_RED = 15000
+
+
+# 概算トークン（日本語目安）：1 token ≒ 1.5 chars
+TOK_PER_CHAR = 1 / 1.5
 
 # ============================================================
 # sys.path（テンプレ準拠：common_lib を import できるように）
@@ -39,8 +85,6 @@ MONO_ROOT = _THIS.parents[3]
 
 # ------------------------------------------------------------
 # MONO_ROOT 妥当性チェック（ズレ事故の再発防止）
-# - MONO_ROOT は common_lib を含む “モノレポ根” であること
-# - 崩れている場合は静かに別DB/別Storagesへ流れるのが最悪なので、例外で止める
 # ------------------------------------------------------------
 if not (MONO_ROOT / "common_lib").is_dir():
     raise RuntimeError(
@@ -49,7 +93,6 @@ if not (MONO_ROOT / "common_lib").is_dir():
         f"  MONO_ROOT  : {MONO_ROOT}\n"
         "対処：pages の階層（parents[3]）前提が崩れていないか確認してください。"
     )
-
 
 for p in (MONO_ROOT, PROJ_DIR, APP_DIR):
     if str(p) not in sys.path:
@@ -63,7 +106,7 @@ PAGE_NAME = _THIS.stem
 # Page
 # ============================================================
 st.set_page_config(
-    page_title="💬 Text Studio / AIチャット",
+    page_title="💬 Text Studio / AIチャット（要約機能）",
     page_icon="💬",
     layout="wide",
 )
@@ -77,8 +120,6 @@ from common_lib.busy import busy_run
 from common_lib.ai.routing import call_text
 from common_lib.ui import render_run_summary_compact
 from common_lib.io import read_doc_context_from_bytes, read_doc_context_from_text
-
-
 
 from common_lib.ai.usage_extract import extract_text_in_out_tokens
 from common_lib.busy.apply_text_result import apply_text_result_to_busy
@@ -104,7 +145,7 @@ sub = page_session_heartbeat(
 
 left, right = st.columns([2, 1])
 with left:
-    st.title("💬 AIチャット")
+    st.title("💬 AIチャット（要約機能付き）")
 with right:
     st.success(f"✅ ログイン中: **{sub}**")
 
@@ -137,20 +178,16 @@ def _ensure_state() -> None:
     st.session_state.setdefault("chat_last_system_text", "")
     st.session_state.setdefault("chat_last_prompt_text", "")
 
-
     # モデルキー（テンプレ準拠：provider:model を session_state で保持）
     st.session_state.setdefault("chat_model_key", DEFAULT_TEXT_MODEL_KEY)
     # 最大出力トークン（テンプレ準拠：session_state 正本）
     st.session_state.setdefault("chat_max_output_tokens", 8000)
-
-
 
 _ensure_state()
 
 # ============================================================
 # Helpers
 # ============================================================
-
 def _get_doc_context_text() -> str:
     ctx = st.session_state.get("doc_context")
     if not ctx:
@@ -215,16 +252,136 @@ def _build_prompt_from_history(latest_user_text: str) -> str:
 
     return "\n\n".join(parts).strip()
 
+# ============================================================
+# 概算トークン（目安）関連（正本ロジック：文字数ベース）
+# ============================================================
+def _estimate_tokens_from_chars(chars: int) -> int:
+    if chars <= 0:
+        return 0
+    return int(chars * TOK_PER_CHAR)
+
+def _estimate_next_input_tokens(*, draft_text: str) -> Tuple[int, int]:
+    """
+    次にAIへ送る想定の入力（system+prompt）の概算トークン数を返す。
+    Returns: (tokens_est, chars_total)
+    """
+    has_doc = bool(_get_doc_context_text().strip())
+    sys_text = _build_system_instructions(has_doc)
+    prm_text = _build_prompt_from_history(draft_text or "")
+    total_chars = len(sys_text) + len(prm_text)
+    return _estimate_tokens_from_chars(total_chars), total_chars
+
+# ============================================================
+# 履歴縮約（方式A / 方式B）
+# ============================================================
+def _cut_history_last_n(*, n: int) -> None:
+    """
+    方式A：履歴そのものを直近n件にカット（表示も消える）
+    """
+    msgs = st.session_state.get("chat_messages", []) or []
+    st.session_state.chat_messages = msgs[-n:]
+
+def _summary_format_instruction() -> str:
+    """
+    要約テンプレ（固定）
+    """
+    return (
+        "【要約形式】\n"
+        "・要約（5〜10行）\n"
+        "・決定事項\n"
+        "・未決事項\n"
+        "・用語/前提（重要な制約のみ）\n"
+        "・次アクション（あれば）\n"
+    )
+
+def _build_summary_prompt(*, old_msgs: List[Dict[str, str]]) -> str:
+    """
+    過去パートを要約させるプロンプト（累積要約前提）
+    """
+    history_text = "\n".join(
+        f"{(m.get('role') or '').strip()}: {(m.get('content') or '').strip()}"
+        for m in old_msgs
+        if (m.get("content") or "").strip()
+    ).strip()
+
+    return (
+        "以下はこれまでの会話履歴です。\n"
+        "後続の会話で必要な前提として、次の形式で要約してください。\n"
+        "推測や新規の情報追加はせず、会話に書かれている事実のみを整理してください。\n\n"
+        + _summary_format_instruction()
+        + "\n【会話履歴】\n"
+        + history_text
+    ).strip()
+
+def _summarize_history_keep_k(*, provider: str, model: str, keep_k: int) -> None:
+    """
+    方式B：直近K件を残し、それ以前（過去＋過去要約）を1つに再要約し、
+          systemメッセージとして先頭1件に固定する。
+    """
+    msgs = st.session_state.get("chat_messages", []) or []
+    if len(msgs) <= keep_k:
+        raise RuntimeError("要約するほど履歴がありません。")
+
+    old_msgs = msgs[:-keep_k]
+    recent_msgs = msgs[-keep_k:]
+
+    summary_prompt = _build_summary_prompt(old_msgs=old_msgs)
+
+    with busy_run(
+        projects_root=PROJECTS_ROOT,
+        user_sub=str(sub),
+        app_name=str(APP_NAME),
+        page_name=str(PAGE_NAME),
+        task_type="text",
+        provider=str(provider),
+        model=str(model),
+        meta={
+            "feature": "ai_chat",
+            "action": "summarize_history",
+            "kept_recent": int(keep_k),
+            "old_msgs": int(len(old_msgs)),
+            "recent_msgs": int(len(recent_msgs)),
+            "summary_prompt_chars": int(len(summary_prompt)),
+        },
+    ) as br:
+        res = call_text(
+            provider=str(provider),
+            model=str(model),
+            prompt=str(summary_prompt),
+            system=None,
+            temperature=None,
+            max_output_tokens=None,
+            extra=None,
+        )
+
+        summary_text = (getattr(res, "text", "") or "").strip()
+
+        pp = apply_text_result_to_busy(
+            br=br,
+            res=res,
+            extract_text_in_out_tokens=extract_text_in_out_tokens,
+            note_ok="ok",
+            note_no_usage="no_usage",
+            note_no_cost="no_cost",
+        )
+
+        br.add_finish_meta(note=str(pp.note or "ok"))
+
+    if not summary_text:
+        raise RuntimeError("要約結果が空でした。")
+
+    st.session_state.chat_messages = (
+        [{
+            "role": "system",
+            "content": "【これまでの会話の要約】\n" + summary_text,
+        }]
+        + recent_msgs
+    )
 
 # ============================================================
 # History helpers（保存/復元：正本ロジック）
 # ============================================================
-
 def _history_payload_v1(*, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-    """
-    履歴保存用 payload（schema=chat_history_v1）を作る。
-    doc_context も含めて保存する。
-    """
     mk_payload = str(st.session_state.get("chat_model_key") or DEFAULT_TEXT_MODEL_KEY)
     p_payload, m_payload = _parse_model_key(mk_payload)
 
@@ -236,11 +393,7 @@ def _history_payload_v1(*, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         "messages": messages,
     }
 
-
 def _history_as_text_v1(*, messages: List[Dict[str, str]]) -> str:
-    """
-    人間が読みやすい TXT 形式にする（復元用ではない）。
-    """
     lines: List[str] = []
 
     ctx = st.session_state.get("doc_context")
@@ -263,14 +416,9 @@ def _history_as_text_v1(*, messages: List[Dict[str, str]]) -> str:
         else:
             lines.append(f"{role}:\n" + content)
         lines.append("")
-
     return "\n".join(lines).strip() + "\n"
 
-
 def _validate_messages_v1(obj: Any) -> bool:
-    """
-    messages（List[Dict]）の最低限バリデーション。
-    """
     if not isinstance(obj, list):
         return False
     for m in obj:
@@ -282,14 +430,7 @@ def _validate_messages_v1(obj: Any) -> bool:
             return False
     return True
 
-
 def _load_history_json_bytes(raw: bytes) -> Tuple[List[Dict[str, str]], Optional[Dict[str, Any]]]:
-    """
-    履歴JSON（bytes）を読み込み、(messages, doc_context) を返す。
-    受け付ける形式：
-    - dict形式: {"schema":..., "messages":[...], "doc_context":...}
-    - list形式:  [...]（messages だけ）
-    """
     loaded = json.loads(raw.decode("utf-8", errors="ignore"))
 
     restored_docctx = None
@@ -306,7 +447,6 @@ def _load_history_json_bytes(raw: bytes) -> Tuple[List[Dict[str, str]], Optional
         raise RuntimeError("このJSONは履歴形式として不正です（messagesの構造を確認してください）。")
 
     if isinstance(restored_docctx, dict):
-        # kind/text/meta を許容（metaは無くてもOK）
         kind = restored_docctx.get("kind")
         text = restored_docctx.get("text")
         if not (isinstance(kind, str) and isinstance(text, str) and text.strip()):
@@ -316,19 +456,10 @@ def _load_history_json_bytes(raw: bytes) -> Tuple[List[Dict[str, str]], Optional
 
     return msgs, restored_docctx
 
-
-def _apply_restored_history(
-    *,
-    messages: List[Dict[str, str]],
-    doc_context: Optional[Dict[str, Any]],
-) -> None:
-    """
-    session_state に履歴を適用し、直近表示系はリセットする。
-    """
+def _apply_restored_history(*, messages: List[Dict[str, str]], doc_context: Optional[Dict[str, Any]]) -> None:
     st.session_state.chat_messages = messages
     st.session_state.doc_context = doc_context
 
-    # 直近情報はリセット（推計しない）
     st.session_state.chat_last_run_id = ""
     st.session_state.chat_last_model = ""
     st.session_state.chat_last_provider = ""
@@ -337,21 +468,16 @@ def _apply_restored_history(
     st.session_state.chat_last_cost_obj = None
     st.session_state.chat_last_note = ""
 
-    # 入力欄クリア：key を進める
     st.session_state.chat_draft_key = (st.session_state.get("chat_draft_key", 0) or 0) + 1
 
-
-
 # ============================================================
-# Sidebar: settings + history save/restore
+# Sidebar: settings + history save/restore + 履歴縮約UI
 # ============================================================
 with st.sidebar:
     st.header("設定")
 
     # ------------------------------------------------------------
     # モデル選択（テンプレ準拠：render_text_model_picker）
-    # - 既存の has_gemini_api_key() は「UIに出すか」の判断として残す
-    # - ただし import できない環境では gemini を無効化（事故防止）
     # ------------------------------------------------------------
     gem_ok = bool(has_gemini_api_key()) and bool(_gemini_available())
 
@@ -365,7 +491,6 @@ with st.sidebar:
     )
 
     provider, model = _parse_model_key(str(model_key or DEFAULT_TEXT_MODEL_KEY))
- 
 
     max_output_tokens = st.number_input(
         "最大出力トークン（上限）",
@@ -379,7 +504,9 @@ with st.sidebar:
 
     st.divider()
 
-
+    # ------------------------------------------------------------
+    # 会話リセット / 文書クリア（縦並び）
+    # ------------------------------------------------------------
     if st.button("会話をリセット", key="btn_reset_chat"):
         st.session_state.pop("chat_messages", None)
         st.session_state.pop("chat_draft_key", None)
@@ -389,6 +516,7 @@ with st.sidebar:
         st.session_state.pop("chat_last_in_tok", None)
         st.session_state.pop("chat_last_out_tok", None)
         st.session_state.pop("chat_last_cost_obj", None)
+        st.session_state.pop("chat_last_note", None)
 
         st.session_state.pop("chat_last_system_text", None)
         st.session_state.pop("chat_last_prompt_text", None)
@@ -396,12 +524,46 @@ with st.sidebar:
         _ensure_state()
         st.rerun()
 
-
     if st.button("文書コンテキストをクリア", key="btn_clear_docctx"):
         st.session_state.pop("doc_context", None)
         st.session_state.doc_context = None
         st.rerun()
 
+    # ------------------------------------------------------------
+    # 概算トークン表示（次回送信の入力：system + prompt）
+    # ------------------------------------------------------------
+    st.divider()
+    st.subheader("入力サイズ目安（概算）")
+
+    draft_key_for_est = f"chat_draft_{st.session_state.get('chat_draft_key', 0)}"
+    draft_now = str(st.session_state.get(draft_key_for_est, "") or "")
+    est_tok, est_chars = _estimate_next_input_tokens(draft_text=draft_now)
+
+    if est_tok >= WARN_RED:
+        st.error(f"🔴 概算トークン: {est_tok:,} / chars: {est_chars:,}")
+    elif est_tok >= WARN_YELLOW:
+        st.warning(f"🟡 概算トークン: {est_tok:,} / chars: {est_chars:,}")
+    else:
+        st.success(f"🟢 概算トークン: {est_tok:,} / chars: {est_chars:,}")
+
+    st.caption("※ 文字数からの概算です（目安）。")
+
+    # ------------------------------------------------------------
+    # 履歴縮約（2方式）
+    # ------------------------------------------------------------
+    st.divider()
+    st.subheader("履歴の縮約")
+
+    if st.button(f"✂️ 直近 {CUT_N} 件にカット", key="btn_cut_history"):
+        _cut_history_last_n(n=CUT_N)
+        st.rerun()
+
+    if st.button("🧠 要約して短く", key="btn_summarize_history"):
+        try:
+            _summarize_history_keep_k(provider=str(provider), model=str(model), keep_k=KEEP_K)
+            st.rerun()
+        except Exception as e:
+            st.error(str(e))
 
     # ============================================================
     # 履歴：ダウンロード / アップロード（JSON / TXT）
@@ -470,7 +632,6 @@ with st.sidebar:
         except Exception as e:
             st.error(f"履歴JSONの読み込みに失敗しました: {e}")
 
-
 # ============================================================
 # 1) 文書コンテキスト（任意）
 # ============================================================
@@ -479,10 +640,7 @@ st.caption("ここでセットした文書は、会話の前提（参考資料�
 
 tab_file, tab_text = st.tabs(["📂 ファイルをアップロード", "📝 テキストを直接貼り付け"])
 
-# ------------------------------------------------------------
-# temp（UI側の一時保持）
-# ------------------------------------------------------------
-tmp_dc = None  # common_lib.io.DocContext を想定（to_dict() を持つ）
+tmp_dc = None  # common_lib.io.DocContext（to_dict を持つ想定）
 
 with tab_file:
     uploaded = st.file_uploader(
@@ -493,9 +651,6 @@ with tab_file:
 
     if uploaded is not None:
         try:
-            # ------------------------------------------------------------
-            # 正本：common_lib.io に委譲（拡張子分岐・decode・抽出はここでしない）
-            # ------------------------------------------------------------
             tmp_dc = read_doc_context_from_bytes(
                 file_name=uploaded.name,
                 data=uploaded.read(),
@@ -515,9 +670,6 @@ with tab_text:
     )
     if pasted.strip():
         try:
-            # ------------------------------------------------------------
-            # 正本：貼り付けも common_lib.io に委譲（正規化・文字数制限）
-            # ------------------------------------------------------------
             tmp_dc = read_doc_context_from_text(
                 raw_text=pasted,
                 max_chars=15000,
@@ -530,9 +682,6 @@ with tab_text:
 col_set, col_show = st.columns([1, 2])
 with col_set:
     if st.button("この文書を会話にセット", disabled=(tmp_dc is None)):
-        # ------------------------------------------------------------
-        # 保存（session_state の正本形式：kind/text/meta）
-        # ------------------------------------------------------------
         st.session_state.doc_context = tmp_dc.to_dict()
         st.success(f"✅ 文書コンテキストをセットしました（{tmp_dc.kind} / 約 {len(tmp_dc.text):,} 文字）")
 
@@ -543,11 +692,9 @@ with col_show:
         text = ctx.get("text", "")
         st.info(f"📌 現在の文書コンテキスト：{kind}（約 {len(text):,} 文字）")
 
-        # meta（あれば）を軽く表示（必要最低限）
         meta = ctx.get("meta") if isinstance(ctx, dict) else None
         if isinstance(meta, dict):
-            truncated = bool(meta.get("truncated"))
-            if truncated:
+            if bool(meta.get("truncated")):
                 st.caption("※ この文書は最大文字数制限により途中でカットされています。")
 
         with st.expander("文書コンテキスト（先頭）", expanded=False):
@@ -563,7 +710,6 @@ st.divider()
 # ============================================================
 st.subheader("2️⃣ チャット")
 
-# 履歴表示
 for m in st.session_state.chat_messages:
     with st.chat_message(m.get("role", "assistant")):
         st.write(m.get("content", ""))
@@ -584,7 +730,6 @@ with col_hint:
 
 if debug_mode:
     st.caption("デバッグはこの下に出ます（送信後の結果など）。")
-
 
 # ============================================================
 # Debug / Inspect：最後にAIへ送ったプロンプト（全文）
@@ -617,7 +762,6 @@ if last_sys.strip() or last_prm.strip():
             key="ta_last_prompt_full",
         )
 
-
 if send:
     if not (user_text or "").strip():
         st.warning("メッセージが空です。")
@@ -625,34 +769,26 @@ if send:
 
     user_text = user_text.strip()
 
-    # 表示用履歴に追加
     st.session_state.chat_messages.append({"role": "user", "content": user_text})
 
-    # 入力欄クリア用
     next_draft_key_value = st.session_state.chat_draft_key + 1
 
-    # prompt/system（ページ責務：組み立て）
     prompt = _build_prompt_from_history(user_text)
     has_doc = bool(_get_doc_context_text().strip())
     system = _build_system_instructions(has_doc)
 
-    # ------------------------------------------------------------
-    # デバッグ用：最後にAIへ送った system / prompt を保存（全文）
-    # ------------------------------------------------------------
     st.session_state["chat_last_system_text"] = str(system or "")
     st.session_state["chat_last_prompt_text"] = str(prompt or "")
 
-
-    # 初期化（推計しない）
     st.session_state.chat_last_in_tok = None
     st.session_state.chat_last_out_tok = None
     st.session_state.chat_last_cost_obj = None
+
     mk = str(st.session_state.get("chat_model_key") or DEFAULT_TEXT_MODEL_KEY)
     provider, model = _parse_model_key(mk)
 
     st.session_state.chat_last_model = str(model)
     st.session_state.chat_last_provider = str(provider)
-
 
     try:
         with busy_run(
@@ -689,10 +825,6 @@ if send:
                 br.add_finish_meta(note="empty")
                 st.stop()
 
-            # ------------------------------------------------------------
-            # 後処理（テンプレ準拠：正本に委譲）
-            # - usage/cost は取れた範囲のみ busy に反映（推計しない）
-            # ------------------------------------------------------------
             pp = apply_text_result_to_busy(
                 br=br,
                 res=res,
@@ -710,25 +842,18 @@ if send:
             br.add_finish_meta(note=str(pp.note or "ok"))
             st.session_state.chat_last_run_id = br.run_id
 
-
-
     except Exception as e:
         st.error(f"AI呼び出しでエラー: {e}")
         st.stop()
 
-    # 表示用履歴に追加
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
 
-    # 入力欄クリア：key を進めて rerun
     st.session_state.chat_draft_key = next_draft_key_value
     st.rerun()
 
 # ============================================================
 # 3) 直近ターン（テンプレ“顔”：tokens / cost / run）
 # ============================================================
-#st.divider()
-#st.subheader("3️⃣ 直近ターン（tokens / cost / run）")
-
 last_run_id = str(st.session_state.get("chat_last_run_id") or "").strip()
 last_model = str(st.session_state.get("chat_last_model") or "").strip()
 
