@@ -6,7 +6,7 @@
 # - 「生成AIへの入力用」の中間テキストを 1 つ生成してダウンロード
 #   * 見出し     : === HEADING[3-1-2] タイトル ===  のように章番号付きで出力
 #   * 本文       : プレーンテキスト
-#   * 表         : 表番号＋タイトルの下に JSON を埋め込む
+#   * 表         : 表番号＋タイトルの下に JSON を埋め込む / または <ここから表> 形式
 #   * 図         : 図のキャプション＋画像ファイル名
 # - 画像ファイルを ZIP で一括ダウンロード
 #
@@ -18,33 +18,15 @@ from pathlib import Path
 import sys
 
 _THIS = Path(__file__).resolve()
-PROJECTS_ROOT = _THIS.parents[3] ## appの時は[2]
+PROJECTS_ROOT = _THIS.parents[3]  # appの時は[2]
 if str(PROJECTS_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECTS_ROOT))
 
-
-from io import BytesIO
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict
 import json
 
 import streamlit as st
 
-# from pathlib import Path
-# import sys
-
-# =========================
-# プロジェクトルートを sys.path に追加
-# =========================
-# PROJECTS_ROOT = Path(__file__).resolve().parents[3]
-# if str(PROJECTS_ROOT) not in sys.path:
-#     sys.path.insert(0, str(PROJECTS_ROOT))
-
-# _THIS = Path(__file__).resolve()
-# PROJECTS_ROOT = _THIS.parents[3] ## appの時は[2]
-# if str(PROJECTS_ROOT) not in sys.path:
-#     sys.path.insert(0, str(PROJECTS_ROOT))
-
-# ==== python-docx 関連 ====
 try:
     from docx import Document
     from docx.text.paragraph import Paragraph
@@ -73,6 +55,12 @@ from lib.word_analysis.images import (
     collect_images_as_zip,
 )
 
+# ✅ 分割ロジック（正本）: lib/word_analysis/chunking.py（作成済み）
+from lib.word_analysis.chunking import (
+    chunk_text_by_markers,
+    make_planned_filenames,
+)
+
 # --- Inboxへ保存（common_lib.inbox.*）---
 from common_lib.auth.auth_helpers import require_login
 from common_lib.inbox.inbox_ops.ingest import ingest_to_inbox
@@ -88,18 +76,17 @@ from lib.word_analysis.explanation import render_word_analysis_help_expander
 from common_lib.ui.ui_basics import subtitle
 from common_lib.ui.banner_lines import render_banner_line_by_key
 
+
 # =========================
 # 中間テキストの構築
 # =========================
 def build_intermediate_text(
     doc: Document,
     base_chapter: int,
-    #mode: str = "standard",  # "standard" or "simple"
     mode: str = "detailed",  # "simple" | "standard" | "detailed"
-
-    
+    *,
+    use_same_left_placeholder: bool,
 ) -> Tuple[str, Dict[str, int]]:
-
     simple_mode = (mode == "simple")
 
     lines: List[str] = []
@@ -108,7 +95,6 @@ def build_intermediate_text(
     heading_counters = [0, 0, 0, 0]
     prev_block: Block | None = None
     pending_table_caption: Paragraph | None = None
-
 
     def _looks_like_heading_line(s: str) -> bool:
         """
@@ -141,7 +127,6 @@ def build_intermediate_text(
             return False
 
         return True
-
 
     def append_blank():
         """簡素モードで、HEADING/FIGURE/TABLE の代わりに入れる空行"""
@@ -188,11 +173,6 @@ def build_intermediate_text(
                 prev_block = block
                 pending_table_caption = None
                 continue
-
-
-
-
-
 
             # ---- 見出し以外の分類 ----
             cat = classify_paragraph(block)
@@ -242,7 +222,6 @@ def build_intermediate_text(
                     else:
                         lines.append("image_files: (none)")
 
-
                 lines.append("")
                 prev_block = block
                 pending_table_caption = None
@@ -272,17 +251,43 @@ def build_intermediate_text(
                 )
 
                 if mode in ("simple", "standard"):
-                    # 簡素モード：
-                    # - 「=== TABLE ... ===」「=== END_TABLE ===」の代わりに
-                    #   <ここから表> ～ <ここまで表> を出す
-                    # - table_number/title/cells: の見出し行は出さない
-                    # - 各行は [a, b, c, ...] の 1 行表記
-                    # - セル内改行はスペースに統合
+                    # ============================================================
+                    # 表（簡素/標準モード）
+                    # 方針：
+                    # - <ここから表> ～ <ここまで表> を出す
+                    # - 表番号/表題は「<ここから表> の直下」に1行で出す（分割されても残す）
+                    # - 行は TSV（タブ区切り）で出す（12,364 のような桁カンマで列が壊れない）
+                    # ============================================================
                     append_blank()
 
                     cells = tbl_json.get("cells", [])
 
+                    # --- 表ブロック開始 ---
                     lines.append("<ここから表>")
+
+                    # --- 表番号/表題（Wordキャプション由来）を <ここから表> の直下に出す ---
+                    raw_num = (tbl_json.get("table_number") or "").strip()
+                    raw_title = (tbl_json.get("title") or "").strip()
+
+                    # "unknown" は表示しない
+                    tbl_num = "" if raw_num.lower() == "unknown" else raw_num
+
+                    # title を優先（多くの場合「表 2.2-1 ...」を含む）
+                    label = raw_title
+
+                    # title が空なら num を使う
+                    if not label and tbl_num:
+                        label = f"表 {tbl_num}".strip()
+
+                    # title が「表」で始まらないのに num がある場合だけ補う（二重表記を避ける）
+                    if label and (not label.lstrip().startswith("表")) and tbl_num:
+                        label = f"表 {tbl_num} {label}".strip()
+
+                    if label:
+                        lines.append(label)
+
+
+                    # --- 表本体（角括弧＋カンマ区切り：旧仕様へ戻す） ---
                     for row in cells:
                         processed = []
                         for x in row:
@@ -290,13 +295,18 @@ def build_intermediate_text(
                             s = " ".join(s.split())
                             processed.append(s)
 
+                        # 旧仕様：列はカンマ区切り、行全体は [...] で囲む
                         row_text = ", ".join(processed)
                         lines.append(f"[{row_text}]")
+
+
+                    # --- 表ブロック終了 ---
                     lines.append("<ここまで表>")
                     lines.append("")
 
-                else:  # mode == "standard" or "detailed"（TABLEは同じ扱い）
-                    # 標準 / 詳細モード（従来仕様そのまま）
+
+
+                else:  # detailed（従来仕様）
                     lines.append("")
                     tbl_num = tbl_json.get("table_number", "unknown")
                     tbl_title = tbl_json.get("title", "")
@@ -311,7 +321,6 @@ def build_intermediate_text(
                 prev_block = block
                 continue
 
-
             prev_block = block
             pending_table_caption = None
 
@@ -321,80 +330,6 @@ def build_intermediate_text(
 
     intermediate_text = "\n".join(lines).strip() + "\n"
     return intermediate_text, stats
-
-
-def split_text_by_heading_markers(text: str, limit: int) -> List[str]:
-    """
-    <ここから見出し> の直前を「候補の切れ目」として、
-    1チャンクが limit 文字を超えないように分割する。
-
-    - <ここから見出し> が無い場合は、最後にフォールバックで単純分割。
-    - 先頭に見出しマーカーが来ても空チャンクは作らない。
-    """
-    if not text:
-        return []
-
-    t = text.strip()
-    if not t:
-        return []
-
-    marker = "<ここから見出し>"
-
-    # 見出しマーカーが無いならフォールバック（固定長で割る）
-    if marker not in t:
-        chunks: List[str] = []
-        i = 0
-        while i < len(t):
-            chunks.append(t[i : i + limit].strip() + "\n")
-            i += limit
-        return [c for c in chunks if c.strip()]
-
-    # マーカー位置で分割候補を作る（marker を保持したまま）
-    parts = t.split(marker)
-
-    # parts[0] は marker より前（本文など）。parts[1:] は marker の後ろ断片
-    # 後ろ断片を marker 付きに戻す
-    segments: List[str] = []
-    if parts[0].strip():
-        segments.append(parts[0].strip())
-
-    for p in parts[1:]:
-        seg = (marker + p).strip()
-        if seg:
-            segments.append(seg)
-
-    # segments を limit 以内になるように束ねる（基本は marker の直前で切れる）
-    chunks: List[str] = []
-    buf = ""
-
-    def flush():
-        nonlocal buf
-        if buf.strip():
-            chunks.append(buf.strip() + "\n")
-        buf = ""
-
-    for seg in segments:
-        # seg 単体が limit を超える場合：ここは例外。seg を内部でさらに割る（でも marker は先頭維持）
-        if len(seg) > limit:
-            # まず buf を確定
-            flush()
-            # seg を無理やり割る
-            j = 0
-            while j < len(seg):
-                chunks.append(seg[j : j + limit].strip() + "\n")
-                j += limit
-            continue
-
-        # buf に足して limit を超えるなら、ここで切る（seg は新チャンクへ）
-        if buf and (len(buf) + 1 + len(seg) > limit):
-            flush()
-            buf = seg
-        else:
-            buf = (buf + "\n" + seg) if buf else seg
-
-    flush()
-    return [c for c in chunks if c.strip()]
-
 
 
 # =========================
@@ -414,36 +349,32 @@ render_banner_line_by_key("purple_light")
 # ============================================================
 # session_state keys（解析結果を rerun でも保持する）
 # ============================================================
-SS_TEXT = "word15_intermediate_text"
-SS_STATS = "word15_stats"
-SS_TXT_NAME = "word15_txt_name"
-SS_SOURCE = "word15_source_filename"
-
-
-
-#st.title("📄 Word 解析 → 生成AI入力用テキスト生成")
+SS_TEXT = "word16_intermediate_text"
+SS_STATS = "word16_stats"
+SS_TXT_NAME = "word16_txt_name"
+SS_SOURCE = "word16_source_filename"
 
 # --- Inbox保存のためログイン必須 ---
 sub = require_login(st)
 if not sub:
     st.stop()
+
 left, right = st.columns([2, 1])
 with left:
     st.title("📄 Word 解析")
 with right:
     st.success(f"✅ ログイン中: **{sub}**")
 
-
 subtitle("生成AI入力用テキスト生成")
 
-st.caption("Word書類の文章校正を行う前処理として，Word書類をAIが読めるようにした中間テキストファイルを作成します．"
-           "inboxに対応していますので，作成された中間ファイルをinboxに保存して，文章校正に進むことができます．"
-           "Word書類の字数が多い時は，中間ファイルは30,000字程度に区切った複数のファイルが作成されます．")
-
+st.caption(
+    "Word書類の文章校正を行う前処理として，Word書類をAIが読めるようにした中間テキストファイルを作成します．"
+    "inboxに対応していますので，作成された中間ファイルをinboxに保存して，文章校正に進むことができます．"
+    "Word書類の字数が多い時は，中間ファイルは30,000字程度に区切った複数のファイルが作成されます．"
+)
 st.caption("オプションは原則デフォルトで問題ありません．")
 
 render_word_analysis_help_expander()
-
 
 if not HAS_DOCX:
     st.error("python-docx がインポートできませんでした。`python-docx` をインストールしてください。")
@@ -454,11 +385,10 @@ with st.sidebar:
     st.header("🔧 オプション")
     st.caption("「出力スタイル」は，続けて「文章校正」を行う時は「標準」で使用してくだい．")
 
-    # 出力スタイル選択（簡素 / 標準 / 詳細）
     output_mode_label = st.radio(
         "出力スタイル",
         options=["簡素", "標準", "詳細"],
-        index=1,  # デフォルト: 簡素
+        index=1,
         horizontal=True,
         help=(
             "簡素：プレーン寄り\n"
@@ -474,9 +404,7 @@ with st.sidebar:
     else:
         output_mode = "detailed"
 
-    st.caption(
-            "「この章の章番号」は，1のまま使用してください"
-        )
+    st.caption("「この章の章番号」は，1のまま使用してください")
     base_chapter = st.number_input(
         "この章の章番号 (base_chapter)",
         min_value=1,
@@ -486,11 +414,7 @@ with st.sidebar:
         help="見出しIDの先頭に付ける章番号です（例: 3 → HEADING[3-1-2]）。",
     )
 
-    st.caption(
-        "「結合セルの扱い」は，続けて「文章校正」を行う時は「横結合セルを<同左>にする」で使用してくだい．"
-    )
-
-    # --- 表の結合セル処理の選択 ---
+    st.caption("「結合セルの扱い」は，続けて「文章校正」を行う時は「横結合セルを<同左>にする」で使用してくだい．")
     merge_label = st.radio(
         "結合セルの扱い",
         options=["そのまま", "横結合セルを <同左> にする"],
@@ -499,20 +423,15 @@ with st.sidebar:
     )
     use_same_left_placeholder = (merge_label == "横結合セルを <同左> にする")
 
-     # --- Inboxへ送る時の分割上限（文字数）---
-    st.caption(
-        "「Inboxへ送る時の分割上限」は，続けて「文章校正」を行う時は30,000で使用してくだい．"
-    )
+    st.caption("「Inboxへ送る時の分割上限」は，続けて「文章校正」を行う時は30,000で使用してくだい．")
     chunk_char_limit = st.slider(
         "📏 Inbox送信用 分割上限（文字数）",
         min_value=10000,
         max_value=50000,
-        value=30000,     # デフォルト 30000
+        value=30000,
         step=5000,
-        help="「<ここから見出し>」の直前で切って、1ファイルがこの文字数を超えないように分割します。",
+        help="「<ここから見出し> / <ここから表>」の直前を優先して切って、1ファイルがこの文字数を超えないように分割します。",
     )
-   
-
 
 uploaded_file = st.file_uploader("Word ファイル（.docx）をアップロードしてください", type=["docx"])
 
@@ -520,14 +439,12 @@ col_btn1, _ = st.columns([1, 3])
 with col_btn1:
     run = st.button("🔍 解析して中間テキストを生成", type="primary")
 
-
 if uploaded_file is None:
     st.info("まず .docx ファイルをアップロードしてください。")
     st.stop()
 
 # 解析結果が既に session_state にあれば、run=False でも表示できるようにする
 has_cached = bool(st.session_state.get(SS_TEXT)) and (st.session_state.get(SS_SOURCE) == uploaded_file.name)
-
 if (not run) and (not has_cached):
     st.stop()
 
@@ -540,7 +457,6 @@ except Exception as e:
     st.error(f"Word ファイルの読み込みに失敗しました: {e}")
     st.stop()
 
-# 解析済みキャッシュがあるならそれを使い、無ければ run で解析する
 has_cached = bool(st.session_state.get(SS_TEXT)) and (st.session_state.get(SS_SOURCE) == uploaded_file.name)
 
 if run or (not has_cached):
@@ -549,10 +465,10 @@ if run or (not has_cached):
             src_doc,
             base_chapter=int(base_chapter),
             mode=output_mode,
+            use_same_left_placeholder=bool(use_same_left_placeholder),
         )
         status.update(label="解析完了", state="complete")
 
-    # session_state に保持（rerun でも消えない）
     st.session_state[SS_TEXT] = intermediate_text
     st.session_state[SS_STATS] = stats
     st.session_state[SS_SOURCE] = uploaded_file.name
@@ -567,11 +483,9 @@ if run or (not has_cached):
         mode_jp = "詳細"
 
     st.session_state[SS_TXT_NAME] = f"{base_name}_intermediate_{mode_jp}.txt"
-
 else:
     intermediate_text = st.session_state[SS_TEXT]
     stats = st.session_state[SS_STATS]
-
 
 # =========================
 # 結果表示
@@ -587,45 +501,36 @@ c4.metric("図ブロック数", stats.get("figure", 0))
 st.markdown("---")
 
 st.subheader("📝 生成された中間テキスト（先頭部分プレビュー）")
+
 # ============================================================
 # 中間テキストのファイル名（以降で共通利用）
 # ============================================================
 txt_name = st.session_state.get(SS_TXT_NAME) or "intermediate.txt"
 
-
 st.code(intermediate_text[:3000], language="text")  # 長くなりすぎないように頭だけ
-
 st.markdown("---")
 
 # ============================================================
-# 分割後の「生成ファイル名（予定）」一覧（ダウンロード前に表示）
+# 分割（正本） & 予定ファイル名一覧
 # ============================================================
-chunks_preview = split_text_by_heading_markers(intermediate_text, int(chunk_char_limit))
+markers = ["<ここから見出し>", "<ここから表>"]
 
-def _split_filename(name: str) -> tuple[str, str]:
-    if "." in name:
-        base, ext = name.rsplit(".", 1)
-        return base, "." + ext
-    return name, ""
+chunks_preview = chunk_text_by_markers(
+    intermediate_text,
+    int(chunk_char_limit),
+    markers=markers,
+)
 
-# 解析時に決めた txt_name をベースに「予定ファイル名」を作る
-base_fn_preview, ext_fn_preview = _split_filename(txt_name)
+planned_names: List[str] = make_planned_filenames(
+    txt_name,
+    len(chunks_preview),
+)
 
-planned_names: List[str] = []
-if chunks_preview:
-    total_preview = len(chunks_preview)
-    for idx in range(1, total_preview + 1):
-        if total_preview == 1:
-            fn = txt_name
-        else:
-            fn = f"{base_fn_preview}_part{idx:03d}{ext_fn_preview or '.txt'}"
-        planned_names.append(fn)
-
-    st.subheader("📄 生成された中間テキスト（分割後ファイル一覧）")
-    st.caption("※ 文字数上限と <ここから見出し> の直前を基準に分割した場合の、保存・運用上のファイル名一覧です。")
+st.subheader("📄 生成された中間テキスト（分割後ファイル一覧）")
+if planned_names:
+    st.caption("※ 文字数上限と <ここから見出し> / <ここから表> の直前を基準に分割した場合の、保存・運用上のファイル名一覧です。")
     st.code("\n".join(planned_names), language="text")
 else:
-    st.subheader("📄 生成された中間テキスト（分割後ファイル一覧）")
     st.caption("※ テキストが空のため、分割ファイルは生成されません。")
 
 st.markdown("---")
@@ -648,7 +553,6 @@ st.download_button(
 # --- 画像 ZIP ---
 img_zip_buf = collect_images_as_zip(src_doc)
 
-# uploaded_file 由来の base 名を session_state から復元
 _src = st.session_state.get(SS_SOURCE)
 if _src:
     _base = _src.rsplit(".", 1)[0]
@@ -672,43 +576,43 @@ elif output_mode == "standard":
 else:
     mode_jp = "詳細"
 
-
 # tags / origin（運用で検索・追跡しやすくする）
 tags_json = '["word_analysis/intermediate"]'
 origin = {
-    "app": "text_studio_app",          # 必要なら実際のAPP名に置換
-    "page": "15_word解析",
+    "app": "text_studio_app",   # 必要なら実際のAPP名に置換
+    "page": "16_word解析",
     "action": "word_intermediate_text",
     "source_filename": (uploaded_file.name if uploaded_file is not None else ""),
     "mode": mode_jp,
     "base_chapter": int(base_chapter),
+    "chunk_char_limit": int(chunk_char_limit),
+    "chunk_markers": markers,
 }
 
+# =========================
+# Inbox 保存
+# =========================
 if st.button("📥 中間テキストを Inbox に保存", type="primary"):
     try:
-        # ★ 分割（<ここから見出し> の直前で切る）
         chunks = chunks_preview
 
         if not chunks:
             st.error("❌ 保存対象テキストが空です。")
             st.stop()
 
-        base_fn, ext_fn = _split_filename(txt_name)
+        if not planned_names or len(planned_names) != len(chunks):
+            st.error("❌ 分割ファイル名の生成に失敗しました（内部状態の不整合）。")
+            st.stop()
 
         total = len(chunks)
         saved_names: List[str] = []
 
         for idx, chunk in enumerate(chunks, start=1):
-            if total == 1:
-                fn = inbox_txt_name
-            else:
-                fn = f"{base_fn}_part{idx:03d}{ext_fn or '.txt'}"
+            fn = planned_names[idx - 1]
 
-            # origin に分割情報を入れる（追跡用）
             origin2 = dict(origin)
             origin2.update(
                 {
-                    "chunk_char_limit": int(chunk_char_limit),
                     "chunk_index": idx,
                     "chunk_total": total,
                 }
@@ -744,7 +648,6 @@ if st.button("📥 中間テキストを Inbox に保存", type="primary"):
 
     except IngestFailed as e:
         st.error(f"❌ Inbox への保存に失敗しました: {e}")
-
 
 st.caption(
     "この中間テキストをInboxへ保存し，Inboxからそのまま AI に投げることで、"

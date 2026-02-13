@@ -3,7 +3,7 @@
 
 [paths]
 # PDF が置いてあるベースディレクトリ（各 folder_name の親）
-base_pdf_dir = "/Users/macmini2025/Documents/myDocument/論文/３部門成長モデル/Papers"
+base_pdf_dir = "/Users/macmini2025/Documents/myDocument/論文2026/株価と感情分析/Papers"
 
 # ref テンプレートのファイル名（base_pdf_dir 直下に置く）
 ref_template_name = "_ref.tex"

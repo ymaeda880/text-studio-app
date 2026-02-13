@@ -201,6 +201,27 @@ st.session_state.setdefault(K_SRC_NAME, "")
 st.session_state.setdefault(K_DO_ANALYZE, False)
 
 # ============================================================
+# セッションキー（ファイル選択変更検知）
+# - 次のファイルを選んだ瞬間に、確定プレビューを消す
+# ============================================================
+K_LAST_FILE_SIG = f"{PAGE_NAME}__last_file_sig"
+st.session_state.setdefault(K_LAST_FILE_SIG, "")
+
+# ============================================================
+# セッションキー（ファイル候補：選択中プレビュー用）
+# - ファイル選択時にここへ読み込み、未解析でもプレビュー表示する
+# - 「①解析（ファイル）」押下で K_SRC_TEXT に確定コピーする
+# ============================================================
+K_FILE_CAND_TEXT = f"{PAGE_NAME}__file_cand_text"
+K_FILE_CAND_NAME = f"{PAGE_NAME}__file_cand_name"
+K_FILE_CAND_SIG = f"{PAGE_NAME}__file_cand_sig"
+
+st.session_state.setdefault(K_FILE_CAND_TEXT, "")
+st.session_state.setdefault(K_FILE_CAND_NAME, "")
+st.session_state.setdefault(K_FILE_CAND_SIG, "")
+
+
+# ============================================================
 # セッションキー（busy_run）
 # ============================================================
 K_LAST_RUN_ID = f"{PAGE_NAME}__last_run_id"
@@ -399,14 +420,14 @@ extra_prompt = render_policy_preview(mode=st.session_state["proof_mode"])
 st.divider()
 
 # ============================================================
-# 直前の入力（file / paste / inbox）を復元（rerun対策）
+# 確定済み入力（①解析ボタンで確定した正本）だけを参照
+# - プレビューは「確定済み(K_SRC_TEXT)」のみ表示する
 # ============================================================
-src_text = ""
+src_text = str(st.session_state.get(K_SRC_TEXT) or "").strip()
 used_file_name: str | None = None
-
-if str(st.session_state.get(K_SRC_TEXT) or "").strip():
-    src_text = str(st.session_state[K_SRC_TEXT]).strip()
+if src_text:
     used_file_name = str(st.session_state.get(K_SRC_NAME) or "").strip() or "input.txt"
+
 
 # ============================================================
 # 入力（radio：貼り付け / ファイル / Inbox）
@@ -460,39 +481,83 @@ if picked_method == INPUT_FILE:
         )
 
     if up:
-        used_file_name = up.name
-        name = up.name.lower()
+  
+        # ------------------------------------------------------------
+        # ファイル選択シグネチャ（選択が変わったら候補/確定をクリア）
+        # ------------------------------------------------------------
+        sig = f"{up.name}:{getattr(up, 'size', 0)}"
+        if str(st.session_state.get(K_LAST_FILE_SIG) or "") != sig:
+            st.session_state[K_LAST_FILE_SIG] = sig
 
-        if name.endswith(".pdf"):
-            data = up.read()
+            # 確定（前のプレビュー）を必ず消す
+            st.session_state[K_SRC_TEXT] = ""
+            st.session_state[K_SRC_NAME] = ""
+            st.session_state[K_DO_ANALYZE] = False
+
+            # 候補もクリア
+            st.session_state[K_FILE_CAND_TEXT] = ""
+            st.session_state[K_FILE_CAND_NAME] = ""
+            st.session_state[K_FILE_CAND_SIG] = ""
+
+        # ------------------------------------------------------------
+        # 候補の読み込み（未解析でもプレビューに出す）
+        # - up.read() は使わない（rerunで空になりやすい）
+        # ------------------------------------------------------------
+        data_bytes = up.getvalue()
+        if not data_bytes:
+            st.warning("ファイルの読み込みに失敗しました（0バイト）。もう一度選択してください。")
+            st.stop()
+
+        fn = up.name or "input.txt"
+        lower = fn.lower()
+
+        cand_text = ""
+        if lower.endswith(".pdf"):
+            # PDFはプレビューも表示
+            st.subheader("📄 PDFプレビュー")
+            display_pdf_bytes(data_bytes, height=600)
+
             try:
-                stats = extract_pdf_text(data)
+                stats = extract_pdf_text(data_bytes)
             except RuntimeError as e:
                 st.error(str(e))
                 st.stop()
-
-            st.subheader("📄 PDFプレビュー")
-            display_pdf_bytes(data, height=600)
 
             if int(stats.get("visible", 0)) < 20:
-                st.warning(
-                    "このPDFは画像PDF（テキスト層なし）と判定しました。OCRツールでテキスト化してから再度お試しください。"
-                )
+                st.warning("このPDFは画像PDF（テキスト層なし）と判定しました。OCRツールでテキスト化してから再度お試しください。")
                 st.stop()
 
-            src_text = (stats.get("text") or "").strip()
+            cand_text = (stats.get("text") or "").strip()
 
         else:
+            from io import BytesIO
+            pseudo = BytesIO(data_bytes)
+            pseudo.name = fn
             try:
-                src_text = load_text_generic(up)
+                cand_text = load_text_generic(pseudo)
             except RuntimeError as e:
                 st.error(str(e))
                 st.stop()
+            cand_text = str(cand_text or "").strip()
 
-        if do_analyze_file and (src_text or "").strip():
-            st.session_state[K_SRC_TEXT] = src_text.strip()
-            st.session_state[K_SRC_NAME] = used_file_name or up.name
+        if not cand_text:
+            st.warning("テキストを取得できませんでした。別のファイルでお試しください。")
+            st.stop()
+
+        # 候補として保存（未解析プレビュー用）
+        st.session_state[K_FILE_CAND_TEXT] = cand_text
+        st.session_state[K_FILE_CAND_NAME] = fn
+        st.session_state[K_FILE_CAND_SIG] = sig
+
+        # ------------------------------------------------------------
+        # 「①解析（ファイル）」押下：候補 → 確定
+        # ------------------------------------------------------------
+        if do_analyze_file:
+            st.session_state[K_SRC_TEXT] = str(st.session_state.get(K_FILE_CAND_TEXT) or "")
+            st.session_state[K_SRC_NAME] = str(st.session_state.get(K_FILE_CAND_NAME) or "input.txt")
             st.session_state[K_DO_ANALYZE] = True
+            st.rerun()
+
 
 # ============================================================
 # ② 貼り付けテキスト（デフォルト）
@@ -577,6 +642,32 @@ else:
     kept_bytes: bytes = st.session_state.get(K_INBOX_BYTES, b"") or b""
     kept_name: str = st.session_state.get(K_INBOX_NAME, "") or ""
 
+
+    # ------------------------------------------------------------
+    # Inbox「選択ファイルを読み込む」結果（K_INBOX_BYTES）→ 候補プレビューへ反映
+    # - readボタンがどこにあっても、bytes が更新されればここで候補を作る
+    # - rerun ループ防止：K_FILE_CAND_SIG で同一アイテムは再処理しない
+    # ------------------------------------------------------------
+    inbox_item_id = str(st.session_state.get(K_INBOX_ITEM) or "")
+    inbox_sig = f"inbox:{inbox_item_id}:{len(kept_bytes)}"
+
+    if kept_bytes and inbox_item_id and str(st.session_state.get(K_FILE_CAND_SIG) or "") != inbox_sig:
+        cand_text = str(_decode_text_bytes(kept_bytes) or "").strip()
+
+        if cand_text:
+            # 前の確定（解析用）プレビューを消して、候補を表示させる
+            st.session_state[K_SRC_TEXT] = ""
+            st.session_state[K_SRC_NAME] = ""
+            st.session_state[K_DO_ANALYZE] = False
+
+            # 候補プレビューを作る
+            st.session_state[K_FILE_CAND_TEXT] = cand_text
+            st.session_state[K_FILE_CAND_NAME] = kept_name or "inbox_text.txt"
+            st.session_state[K_FILE_CAND_SIG] = inbox_sig
+
+            st.rerun()
+
+
     col_mode3, col_btn3 = st.columns([3, 1])
 
     with col_mode3:
@@ -615,22 +706,24 @@ else:
 
         try:
             txt = _decode_text_bytes(kept_bytes)
-            src_text = (txt or "").strip()
+            src_text_new = str(txt or "").strip()
             used_file_name = kept_name or "inbox_text.txt"
 
-            if not src_text:
+            if not src_text_new:
                 st.warning("テキストが空でした（0文字）。別のファイルを選択してください。")
                 st.stop()
 
-            st.session_state[K_SRC_TEXT] = src_text
+            # ①解析押下で確定
+            st.session_state[K_SRC_TEXT] = src_text_new
             st.session_state[K_SRC_NAME] = used_file_name
             st.session_state[K_DO_ANALYZE] = True
 
-            st.success("Inbox テキストをセットしました。解析を開始します。")
+            st.success("Inbox テキストを確定しました。解析を開始します。")
 
         except Exception as e:
             st.error(f"Inbox テキストの読み込み/変換に失敗しました: {e}")
             st.stop()
+
 
 # ============================================================
 # 解析の実行
@@ -638,8 +731,17 @@ else:
 plan_md: str = ""
 numbered_preview: str = ""
 
-if src_text:
-    lines = to_numbered_lines(src_text)
+# ------------------------------------------------------------
+# プレビュー表示テキスト
+# - 確定（K_SRC_TEXT）があればそれを表示
+# - 無ければ、ファイル候補（K_FILE_CAND_TEXT）を表示
+# ------------------------------------------------------------
+confirmed_text = str(st.session_state.get(K_SRC_TEXT) or "").strip()
+candidate_text = str(st.session_state.get(K_FILE_CAND_TEXT) or "").strip()
+preview_text = confirmed_text or candidate_text
+
+if preview_text:
+    lines = to_numbered_lines(preview_text)
 
     st.subheader("👀 行番号付きプレビュー（テキスト表示）")
     st.text_area(
@@ -648,210 +750,224 @@ if src_text:
         height=260,
     )
 
-    want_analyze = bool(st.session_state.pop(K_DO_ANALYZE, False))
+want_analyze = bool(st.session_state.pop(K_DO_ANALYZE, False))
 
-    if want_analyze:
-        # ------------------------------------------------------------
-        # model_key -> provider/model（テンプレ準拠）
-        # ------------------------------------------------------------
-        model_key = str(st.session_state.get(K_MODEL_KEY) or DEFAULT_MODEL_KEY)
-        provider, chosen_model = _parse_model_key(model_key)
-        if not provider or not chosen_model:
-            st.error(f"モデル指定が不正です: {model_key}")
-            st.stop()
 
-        # ------------------------------------------------------------
-        # 直近表示を初期化（推計しない）
-        # ------------------------------------------------------------
-        st.session_state[K_LAST_MODEL] = chosen_model
-        st.session_state[K_LAST_PROVIDER] = provider
-        st.session_state[K_LAST_IN_TOK] = None
-        st.session_state[K_LAST_OUT_TOK] = None
-        st.session_state[K_LAST_COST_OBJ] = None
-        st.session_state[K_LAST_NOTE] = ""
-        st.session_state[K_LAST_RUN_ID] = ""
-        st.session_state[K_LAST_RUN_ACTION] = ""
+if want_analyze:
 
-        # ------------------------------------------------------------
-        # System / prompt（ページ責務：方針の組み立て）
-        # ------------------------------------------------------------
-        mode = str(st.session_state.get("proof_mode") or DEFAULT_MODE)
+    # ------------------------------------------------------------
+    # 解析の正本は「確定（K_SRC_TEXT）」のみ
+    # - プレビュー用の lines（preview_text由来）とは別に作る
+    # ------------------------------------------------------------
+    src_text = str(st.session_state.get(K_SRC_TEXT) or "").strip()
+    used_file_name = str(st.session_state.get(K_SRC_NAME) or "input.txt")
+    lines = to_numbered_lines(src_text)
 
-        system_prompt = build_system_prompt(
-            mode=mode,
-            extra=str(extra_prompt or ""),
-        )
+    # ------------------------------------------------------------
+    # model_key -> provider/model（テンプレ準拠）
+    # ------------------------------------------------------------
+    model_key = str(st.session_state.get(K_MODEL_KEY) or DEFAULT_MODEL_KEY)
+    provider, chosen_model = _parse_model_key(model_key)
+    if not provider or not chosen_model:
+        st.error(f"モデル指定が不正です: {model_key}")
+        st.stop()
 
-        numbered_preview = _render_numbered_preview_no_paging(lines)
+    # ------------------------------------------------------------
+    # 直近表示を初期化（推計しない）
+    # ------------------------------------------------------------
+    st.session_state[K_LAST_MODEL] = chosen_model
+    st.session_state[K_LAST_PROVIDER] = provider
+    st.session_state[K_LAST_IN_TOK] = None
+    st.session_state[K_LAST_OUT_TOK] = None
+    st.session_state[K_LAST_COST_OBJ] = None
+    st.session_state[K_LAST_NOTE] = ""
+    st.session_state[K_LAST_RUN_ID] = ""
+    st.session_state[K_LAST_RUN_ACTION] = ""
 
-        prompt = (
-            "次の文章を解析し、校正方針（ページ/行/理由）を Markdown 表で出力してください。\n"
-            "Markdown表以外は出力しないでください。\n\n"
-            "【追加指示（任意）】\n"
-            f"{(extra_prompt or '').strip()}\n\n"
-            "【原文（行番号付き）】\n"
-            f"{numbered_preview}\n"
-        )
+    # ------------------------------------------------------------
+    # System / prompt（ページ責務：方針の組み立て）
+    # ------------------------------------------------------------
+    mode = str(st.session_state.get("proof_mode") or DEFAULT_MODE)
 
-        # ------------------------------------------------------------
-        # AI 実行（busy_run）＋ 後処理は正本へ（apply_text_result_to_busy）
-        # ------------------------------------------------------------
-        try:
-            with busy_run(
-                projects_root=PROJECTS_ROOT,
-                user_sub=str(sub),
-                app_name=str(APP_NAME),
-                page_name=str(PAGE_NAME),
-                task_type="text",
-                provider=provider,
-                model=chosen_model,
-                meta={
-                    "feature": "proofreading_policy",
-                    "action": "analyze_policy",
-                    "input_method": str(picked_method),
-                    "input_chars": len(src_text or ""),
-                    "lines": len(lines),
-                    "mode": mode,
-                    "dl_format": str(st.session_state.get("dl_format_radio") or ""),
-                },
-            ) as br:
-                st.session_state[K_LAST_RUN_ID] = br.run_id
-                st.session_state[K_LAST_RUN_ACTION] = "analyze_policy"
+    system_prompt = build_system_prompt(
+        mode=mode,
+        extra=str(extra_prompt or ""),
+    )
 
-                with st.spinner("解析中（校正方針を抽出）…"):
-                    res = call_text(
-                        provider=provider,
-                        model=chosen_model,
-                        prompt=prompt,
-                        system=system_prompt,
-                        temperature=None,
-                        max_output_tokens=None,
-                        extra=None,
-                    )
+    numbered_preview = _render_numbered_preview_no_paging(lines)
 
-                plan_md = (getattr(res, "text", "") or "").strip()
+    prompt = (
+        "次の文章を解析し、校正方針（ページ/行/理由）を Markdown 表で出力してください。\n"
+        "Markdown表以外は出力しないでください。\n\n"
+        "【追加指示（任意）】\n"
+        f"{(extra_prompt or '').strip()}\n\n"
+        "【原文（行番号付き）】\n"
+        f"{numbered_preview}\n"
+    )
 
-                pp = apply_text_result_to_busy(
-                    br=br,
-                    res=res,
-                    extract_text_in_out_tokens=extract_text_in_out_tokens,
-                    note_ok="ok",
-                    note_no_usage="no_usage",
-                    note_no_cost="no_cost",
-                )
-
-                st.session_state[K_LAST_IN_TOK] = pp.in_tokens
-                st.session_state[K_LAST_OUT_TOK] = pp.out_tokens
-                st.session_state[K_LAST_COST_OBJ] = pp.cost_obj
-                st.session_state[K_LAST_NOTE] = pp.note
-
-        except Exception as e:
-            st.error(f"実行に失敗しました: {e}")
-            st.stop()
-
-        st.success("解析が完了しました。行番号/理由つきで方針を表示します。")
-
-        # ============================================================
-        # 校正方針 表示
-        # ============================================================
-        st.subheader("📋 校正方針")
-        html_table = md_table_to_html(plan_md)
-        inject_proof_table_css()
-        st.markdown(html_table, unsafe_allow_html=True)
-
-        # ============================================================
-        # 実行サマリ（テンプレと同じ“顔”）
-        # ============================================================
-        render_run_summary_compact(
+    # ------------------------------------------------------------
+    # AI 実行（busy_run）＋ 後処理は正本へ（apply_text_result_to_busy）
+    # ------------------------------------------------------------
+    try:
+        with busy_run(
             projects_root=PROJECTS_ROOT,
-            run_id=st.session_state.get(K_LAST_RUN_ID),
-            model=st.session_state.get(K_LAST_MODEL),
-            in_tokens=st.session_state.get(K_LAST_IN_TOK),
-            out_tokens=st.session_state.get(K_LAST_OUT_TOK),
-            cost=st.session_state.get(K_LAST_COST_OBJ),
-            note=str(st.session_state.get(K_LAST_NOTE) or ""),
-            show_divider=True,
+            user_sub=str(sub),
+            app_name=str(APP_NAME),
+            page_name=str(PAGE_NAME),
+            task_type="text",
+            provider=provider,
+            model=chosen_model,
+            meta={
+                "feature": "proofreading_policy",
+                "action": "analyze_policy",
+                "input_method": str(picked_method),
+                "input_chars": len(src_text or ""),
+                "lines": len(lines),
+                "mode": mode,
+                "dl_format": str(st.session_state.get("dl_format_radio") or ""),
+            },
+        ) as br:
+            st.session_state[K_LAST_RUN_ID] = br.run_id
+            st.session_state[K_LAST_RUN_ACTION] = "analyze_policy"
+
+            with st.spinner("解析中（校正方針を抽出）…"):
+                res = call_text(
+                    provider=provider,
+                    model=chosen_model,
+                    prompt=prompt,
+                    system=system_prompt,
+                    temperature=None,
+                    max_output_tokens=None,
+                    extra=None,
+                )
+
+            plan_md = (getattr(res, "text", "") or "").strip()
+
+            pp = apply_text_result_to_busy(
+                br=br,
+                res=res,
+                extract_text_in_out_tokens=extract_text_in_out_tokens,
+                note_ok="ok",
+                note_no_usage="no_usage",
+                note_no_cost="no_cost",
+            )
+
+            st.session_state[K_LAST_IN_TOK] = pp.in_tokens
+            st.session_state[K_LAST_OUT_TOK] = pp.out_tokens
+            st.session_state[K_LAST_COST_OBJ] = pp.cost_obj
+            st.session_state[K_LAST_NOTE] = pp.note
+
+    except Exception as e:
+        st.error(f"実行に失敗しました: {e}")
+        st.stop()
+
+    st.success("解析が完了しました。行番号/理由つきで方針を表示します。")
+
+    # ============================================================
+    # 校正方針 表示
+    # ============================================================
+    st.subheader("📋 校正方針")
+    html_table = md_table_to_html(plan_md)
+    inject_proof_table_css()
+    st.markdown(html_table, unsafe_allow_html=True)
+
+    # ============================================================
+    # 実行サマリ（テンプレと同じ“顔”）
+    # ============================================================
+    render_run_summary_compact(
+        projects_root=PROJECTS_ROOT,
+        run_id=st.session_state.get(K_LAST_RUN_ID),
+        model=st.session_state.get(K_LAST_MODEL),
+        in_tokens=st.session_state.get(K_LAST_IN_TOK),
+        out_tokens=st.session_state.get(K_LAST_OUT_TOK),
+        cost=st.session_state.get(K_LAST_COST_OBJ),
+        note=str(st.session_state.get(K_LAST_NOTE) or ""),
+        show_divider=True,
+    )
+
+    # ============================================================
+    # ダウンロード（PDF or Word）
+    # - レポート生成側が usd_jpy を要求するため、fx正本から取得して渡す（ページ入力はしない）
+    # - cost は推計しない（builders側の表示仕様に従う）
+    # ============================================================
+    st.markdown("### ⤵️ 解析レポートをダウンロード")
+
+    file_base = (used_file_name or "pasted_text").rsplit(".", 1)[0]
+    mode_label = mode.replace(" ", "")
+    file_stub = f"校正結果_{file_base}_[{mode_label}]" if mode_label else f"校正結果_{file_base}"
+
+    in_t = st.session_state.get(K_LAST_IN_TOK)
+    out_t = st.session_state.get(K_LAST_OUT_TOK)
+
+    # 取れた範囲のみ渡す（推計しない）
+    # - 未取得を 0 埋めすると「0トークン」と誤解されやすいので空 dict にする
+    if isinstance(in_t, int) and isinstance(out_t, int):
+        usage_summary = {
+            "input_tokens": int(in_t),
+            "output_tokens": int(out_t),
+            "total_tokens": int(in_t + out_t),
+        }
+    else:
+        usage_summary = {}
+
+
+    fx = get_default_usd_jpy()
+    usd_jpy = float(fx.usd_jpy)
+
+    # builders に渡す formatter（推計しない：未取得なら「—」）
+    def _format_cost_lines_stub(*args: Any, **kwargs: Any) -> list[str]:
+        return ["概算: —（このレポートでは推計しません）"]
+
+    if str(dl_choice_key) == "pdf":
+        pdf_bytes = build_policy_pdf_bytes_core(
+            original_numbered_preview=numbered_preview,
+            plan_md=plan_md,
+            model=chosen_model,
+            mode=mode,
+            extra_prompt=extra_prompt,
+            src_name=used_file_name or "pasted_text.txt",
+            usage_summary=usage_summary,
+            usd_jpy=usd_jpy,
+            format_cost_lines=_format_cost_lines_stub,
+        )
+        if pdf_bytes:
+            st.download_button(
+                "PDF（.pdf）として保存",
+                data=pdf_bytes,
+                file_name=f"{file_stub}.pdf",
+                mime="application/pdf",
+                key=f"dl_pdf_{file_stub}",
+            )
+        else:
+            st.warning(
+                "PDF を生成できませんでした。`pip install reportlab` を実行し、"
+                "CIDフォント（HeiseiMin/HeiseiKakuGo）が使えるか確認してください。"
+            )
+    else:
+        data_docx, ext = build_policy_docx_bytes_core(
+            original_numbered_preview=numbered_preview,
+            plan_md=plan_md,
+            model=chosen_model,
+            mode=mode,
+            extra_prompt=extra_prompt,
+            src_name=used_file_name or "pasted_text.txt",
+            usage_summary=usage_summary,
+            usd_jpy=usd_jpy,
+            format_cost_lines=_format_cost_lines_stub,
+        )
+        st.download_button(
+            "Word（.docx）として保存" if ext == ".docx" else "テキスト（.txt）として保存",
+            data=data_docx,
+            file_name=f"{file_stub}{ext}",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            if ext == ".docx"
+            else "text/plain",
+            key=f"dl_word_{file_stub}",
         )
 
-        # ============================================================
-        # ダウンロード（PDF or Word）
-        # - レポート生成側が usd_jpy を要求するため、fx正本から取得して渡す（ページ入力はしない）
-        # - cost は推計しない（builders側の表示仕様に従う）
-        # ============================================================
-        st.markdown("### ⤵️ 解析レポートをダウンロード")
-
-        file_base = (used_file_name or "pasted_text").rsplit(".", 1)[0]
-        mode_label = mode.replace(" ", "")
-        file_stub = f"校正結果_{file_base}_[{mode_label}]" if mode_label else f"校正結果_{file_base}"
-
-        in_t = st.session_state.get(K_LAST_IN_TOK)
-        out_t = st.session_state.get(K_LAST_OUT_TOK)
-
-        # 取れた範囲のみ渡す（推計しない）
-        # - 未取得を 0 埋めすると「0トークン」と誤解されやすいので空 dict にする
-        if isinstance(in_t, int) and isinstance(out_t, int):
-            usage_summary = {
-                "input_tokens": int(in_t),
-                "output_tokens": int(out_t),
-                "total_tokens": int(in_t + out_t),
-            }
-        else:
-            usage_summary = {}
-
-
-        fx = get_default_usd_jpy()
-        usd_jpy = float(fx.usd_jpy)
-
-        # builders に渡す formatter（推計しない：未取得なら「—」）
-        def _format_cost_lines_stub(*args: Any, **kwargs: Any) -> list[str]:
-            return ["概算: —（このレポートでは推計しません）"]
-
-        if str(dl_choice_key) == "pdf":
-            pdf_bytes = build_policy_pdf_bytes_core(
-                original_numbered_preview=numbered_preview,
-                plan_md=plan_md,
-                model=chosen_model,
-                mode=mode,
-                extra_prompt=extra_prompt,
-                src_name=used_file_name or "pasted_text.txt",
-                usage_summary=usage_summary,
-                usd_jpy=usd_jpy,
-                format_cost_lines=_format_cost_lines_stub,
-            )
-            if pdf_bytes:
-                st.download_button(
-                    "PDF（.pdf）として保存",
-                    data=pdf_bytes,
-                    file_name=f"{file_stub}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_pdf_{file_stub}",
-                )
-            else:
-                st.warning(
-                    "PDF を生成できませんでした。`pip install reportlab` を実行し、"
-                    "CIDフォント（HeiseiMin/HeiseiKakuGo）が使えるか確認してください。"
-                )
-        else:
-            data_docx, ext = build_policy_docx_bytes_core(
-                original_numbered_preview=numbered_preview,
-                plan_md=plan_md,
-                model=chosen_model,
-                mode=mode,
-                extra_prompt=extra_prompt,
-                src_name=used_file_name or "pasted_text.txt",
-                usage_summary=usage_summary,
-                usd_jpy=usd_jpy,
-                format_cost_lines=_format_cost_lines_stub,
-            )
-            st.download_button(
-                "Word（.docx）として保存" if ext == ".docx" else "テキスト（.txt）として保存",
-                data=data_docx,
-                file_name=f"{file_stub}{ext}",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                if ext == ".docx"
-                else "text/plain",
-                key=f"dl_word_{file_stub}",
-            )
-
-else:
+# ------------------------------------------------------------
+# 何も入力が無いときだけ案内を出す
+# ------------------------------------------------------------
+if (not preview_text) and (not want_analyze):
     st.info("入力（📝/📁/📥）から本文を指定して『① 解析』を実行してください。")
+
