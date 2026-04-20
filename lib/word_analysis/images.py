@@ -33,7 +33,6 @@ def get_image_filenames_from_paragraph(p: Paragraph) -> List[str]:
 
     for run in p.runs:
         try:
-            # python-docx の BaseOxmlElement.xpath は nsmap を内部で解決してくれる
             blips = run._element.xpath(BLIP_PATH)
         except Exception:
             continue
@@ -47,7 +46,17 @@ def get_image_filenames_from_paragraph(p: Paragraph) -> List[str]:
             if rel is None:
                 continue
 
-            img_part = rel.target_part
+            # ------------------------------------------------------------
+            # External relation は target_part を持たないため除外
+            # ------------------------------------------------------------
+            if getattr(rel, "is_external", False):
+                continue
+
+            try:
+                img_part = rel.target_part
+            except Exception:
+                continue
+
             # partname: '/word/media/image1.png' → 'image1.png'
             name = os.path.basename(str(getattr(img_part, "partname", "")) or "")
             if name:
@@ -59,16 +68,47 @@ def get_image_filenames_from_paragraph(p: Paragraph) -> List[str]:
 def collect_images_as_zip(doc: Document) -> BytesIO:
     """
     Document から画像パーツを集めて ZIP (in-memory) を作成して返す。
+    External link の画像は除外する。
     """
     buf = BytesIO()
+    added_names: set[str] = set()
+
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for rel in doc.part.rels.values():
-            if rel.reltype == RT.IMAGE:
+
+            # ------------------------------------------------------------
+            # 画像以外は無視
+            # ------------------------------------------------------------
+            if rel.reltype != RT.IMAGE:
+                continue
+
+            # ------------------------------------------------------------
+            # External relation は target_part を持たない
+            # ------------------------------------------------------------
+            if getattr(rel, "is_external", False):
+                continue
+
+            try:
                 part = rel.target_part
-                name = os.path.basename(str(part.partname))
-                if not name:
-                    continue
+            except Exception:
+                continue
+
+            name = os.path.basename(str(getattr(part, "partname", "")) or "")
+            if not name:
+                continue
+
+            # ------------------------------------------------------------
+            # 同名重複を避ける
+            # ------------------------------------------------------------
+            if name in added_names:
+                continue
+
+            try:
                 zf.writestr(name, part.blob)
+                added_names.add(name)
+            except Exception:
+                continue
+
     buf.seek(0)
     return buf
 
@@ -77,20 +117,18 @@ def paragraph_has_image(paragraph):
     """
     Word Paragraph 内に画像 (<w:drawing> or <w:pict>) があるか判定する
     """
-    # docx の XML ノードを直接見る
     element = paragraph._element
 
-    # drawing 要素を探す（Word 画像の基本パターン）
+    # drawing 要素（通常の画像）
     if element.xpath('.//w:drawing'):
         return True
 
-    # pict 要素（古い Word 形式の画像）
+    # pict 要素（旧形式）
     if element.xpath('.//w:pict'):
         return True
 
-    # a:blip があるか確認（画像の実体を指す r:embed）
+    # a:blip（画像参照）
     if element.xpath('.//a:blip'):
         return True
 
     return False
-

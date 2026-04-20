@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/16_word解析.py
+# text_studio_app/pages/04_word解析.py
 #
 # Word(.docx) をアップロードして内部構造をざっくり解析し、
 # - 本文 / 図 / 表 / 目次候補 / 見出し を分類
