@@ -1,12 +1,13 @@
 # 必要なパッケージを1行ずつ記載してください
-streamlit>=1.38
+streamlit==1.53.0
 # openai>=1.40
 python-docx>=1.1.0
 
 pymupdf
 pdfplumber
-
 pypdf
+#streamlit[pdf]==1.38.0
+pypdfium2>=4.30.0
 
 # --- OCR（画像・スキャンPDF用） ---
 pytesseract>=0.3.10
@@ -19,9 +20,6 @@ pandas>=2.2.2
 openai>=1.51.0
 pypandoc>=1.13; sys_platform != 'win32'  # pandocがある場合
 docx2pdf>=0.1.8; sys_platform != 'linux' # macOS/Windowsで有効
-
-streamlit[pdf]==1.38.0
-pypdfium2>=4.30.0
 
 xlsxwriter>=3.2.0        # Excel出力 (.xlsx)
 
@@ -51,3 +49,7 @@ google-genai
 # JWT トークン検証に必要（jwt_utilsで利用）
 PyJWT>=2.9.0
 extra-streamlit-components
+
+werkzeug
+
+PyJWT

@@ -3,26 +3,16 @@
 #
 # タスク表（タスク / 開始 / 終了 / タイプ / 備考）をテキストエリアに貼り付けて
 # ガントチャートを作成するページ。
-# - 入力の行順（上から）でタスクを並べる（1行目がグラフの一番上）
-# - 同じタスクに「計画」と「実績」がある場合：
-#     上の行 = 計画行（タスク名を表示）
-#     下の行 = 実績行（ラベルは空文字）
-#   ⇒ 1タスクにつき縦に2行分のスペースを確保して表示を安定化
-# - 終了が空欄 or 開始＝終了 はマイルストーン（●）
-# - x軸は月ごとの縦グリッド線を表示
-# - 備考は右端に Annotation で表示（計画と実績で異なる備考も別々に表示）
-# - テキストの折り返しは備考にあらかじめ <br> を入れておく前提
-#   （改行は自動で <br> に変換）
 
 from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
 
-# lib 側に切り出したモジュール
 from lib.graph.gantt.sample_data import SAMPLE_TEXT
 from lib.graph.gantt.parser import parse_tasks
 from lib.graph.gantt.builder import build_gantt
+
 
 # ------------------------------------------------------------
 # ページ設定
@@ -39,6 +29,38 @@ st.caption(
     "ガントチャートと備考欄付きの図を作成します。"
 )
 
+
+# ------------------------------------------------------------
+# SessionState 初期化
+# ------------------------------------------------------------
+if "gantt_raw_text" not in st.session_state:
+    st.session_state["gantt_raw_text"] = ""
+
+if "gantt_sample_choice" not in st.session_state:
+    st.session_state["gantt_sample_choice"] = "なし"
+
+
+# ------------------------------------------------------------
+# サイドバー：サンプル選択 + 適用ボタン
+# ------------------------------------------------------------
+with st.sidebar:
+    st.markdown("### サンプルデータ")
+
+    sample_choice = st.radio(
+        "サンプルを選択",
+        ("なし", "サンプル1"),
+        key="gantt_sample_choice",
+    )
+
+    if st.button("このサンプルを貼り付ける"):
+        if sample_choice == "サンプル1":
+            st.session_state["gantt_raw_text"] = SAMPLE_TEXT
+        else:
+            st.session_state["gantt_raw_text"] = ""
+
+        st.success(f"「{sample_choice}」を貼り付けました。")
+
+
 # ------------------------------------------------------------
 # 入力フォーマット説明
 # ------------------------------------------------------------
@@ -54,32 +76,38 @@ with st.expander("📥 入力方法（フォーマット）", expanded=False):
 - `タスク` 列に `<続き>` とある行は、1つ上のタスクの **2本目・3本目…のバー** として同じ行に追加されます。
         """
     )
-    st.text("サンプル（Excel からコピーした想定）")
-    st.code(SAMPLE_TEXT, language="text")
+
 
 # ------------------------------------------------------------
 # 入力テキストエリア
 # ------------------------------------------------------------
-st.markdown("### 1) タスク表をここに貼り付け（またはドラッグ＆ドロップでテキストを投入）")
+st.markdown("### 1) タスク表をここに貼り付け")
 
 raw_text = st.text_area(
     "タスク / 開始 / 終了 / タイプ（＋任意で備考）の列を貼り付けてください",
-    value="",
+    key="gantt_raw_text",
     height=260,
     placeholder="例：Excel で範囲をコピーしてそのまま貼り付け（1行目は列名）",
 )
 
-use_sample = st.checkbox(
-    "サンプルデータを使う（上を書き換えずに動作確認したいとき）",
-    value=False,
-)
-if use_sample and not raw_text.strip():
-    raw_text = SAMPLE_TEXT
 
 # ------------------------------------------------------------
-# パース & 表示
+# 実行ボタン
 # ------------------------------------------------------------
-if raw_text.strip():
+run_gantt = st.button(
+    "📐 ガントチャートを作成",
+    type="primary",
+)
+
+
+# ------------------------------------------------------------
+# ボタン押下後だけパース & 表示
+# ------------------------------------------------------------
+if run_gantt:
+    if not raw_text.strip():
+        st.warning("タスク表を貼り付けてください。")
+        st.stop()
+
     try:
         df = parse_tasks(raw_text)
     except Exception as e:
@@ -89,9 +117,6 @@ if raw_text.strip():
     st.success(f"タスク {len(df)} 行を読み込みました。")
     st.dataframe(df, use_container_width=True)
 
-    # =============================
-    # 表示調整用 expander（フォントサイズ・行間）
-    # =============================
     with st.expander("🛠️ グラフの表示調整（文字サイズ・行間）", expanded=False):
         label_font_size = st.slider(
             "文字サイズ（タスク名・軸目盛・凡例など）",
@@ -110,7 +135,6 @@ if raw_text.strip():
 
     st.markdown("### 2) ガントチャート")
 
-    # lib 側の build_gantt にパラメータを渡して描画用 Figure を生成
     fig = build_gantt(
         df,
         label_font_size=label_font_size,
@@ -120,47 +144,39 @@ if raw_text.strip():
     if fig.data:
         st.plotly_chart(fig, use_container_width=True)
 
-        # =============================
-        #  図の保存（PNG / HTML）
-        # =============================
         st.markdown("### 3) 図の保存")
 
         col_png, col_html = st.columns(2)
 
-        # --- PNG ダウンロード ---
         with col_png:
             try:
-                # 画面用 fig とは別に、PNG 用のコピーを作る
                 fig_png = fig.full_figure_for_development(warn=False)
 
-                # PNG 用だけ左側の余白を広めに取る（マイルストーンが欠けないように）
                 date_candidates = pd.concat(
                     [df["開始"].dropna(), df["終了"].dropna()],
                     ignore_index=True,
                 )
+
                 if not date_candidates.empty:
                     min_date = date_candidates.min()
                     max_date = date_candidates.max()
                 else:
                     min_date = max_date = pd.Timestamp.today()
 
-                # 左側を少し広げたレンジ（画面表示よりゆとりを持たせる）
                 x_min_png = min_date - pd.Timedelta(days=20)
                 x_max_png = max_date + pd.Timedelta(days=60)
 
-                # 高さは画面用レイアウトをそのまま利用（なければ 600 に）
                 fig_height = fig.layout.height or 600
 
                 fig_png.update_layout(
-                    width=1200,   # PNG 専用の横幅（広めに取る）
+                    width=1200,
                     height=fig_height,
-                    margin=dict(l=300, r=300, t=120, b=100),  # 画面より広め
+                    margin=dict(l=300, r=300, t=120, b=100),
                 )
                 fig_png.update_xaxes(
                     range=[x_min_png, x_max_png],
                 )
 
-                # PNG をバイト列として取得
                 png_bytes = fig_png.to_image(format="png", scale=2)
 
                 st.download_button(
@@ -177,11 +193,10 @@ if raw_text.strip():
                     f"詳細: {e}"
                 )
 
-        # --- HTML ダウンロード ---
         with col_html:
             html_str = fig.to_html(
                 full_html=False,
-                include_plotlyjs="cdn",  # 単独 HTML として開けるように JS も含める
+                include_plotlyjs="cdn",
             )
             st.download_button(
                 label="📥 HTML としてダウンロード（インタラクティブ）",
@@ -195,4 +210,4 @@ if raw_text.strip():
         st.info("有効なタスクがありません（開始日が空欄の行は無視されます）。")
 
 else:
-    st.info("タスク表を貼り付けると、ここにガントチャートが表示されます。")
+    st.info("タスク表を貼り付けて、「📐 ガントチャートを作成」を押してください。")

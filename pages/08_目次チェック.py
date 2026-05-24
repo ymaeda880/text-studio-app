@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/12_目次チェック.py
+# text_studio_app/pages/08_目次チェック.py
 # ============================================================
 # 📄 目次チェック（ローカル照合 / 非AI）
 #
@@ -47,11 +47,26 @@ APP_NAME = _THIS.parents[1].name
 PAGE_NAME = _THIS.stem
 
 # ============================================================
-# common_lib（正本：ログイン/heartbeat + UI）
+# session_state keys
 # ============================================================
-from common_lib.sessions.page_entry import page_session_heartbeat
-from common_lib.ui.ui_basics import subtitle
-from common_lib.ui.banner_lines import render_banner_line_by_key
+SS_TOC_RESULT_READY = f"{PAGE_NAME}__result_ready"
+SS_TOC_PAGES_TEXT = f"{PAGE_NAME}__pages_text"
+SS_TOC_LINES = f"{PAGE_NAME}__toc_lines"
+SS_TOC_OVERVIEW = f"{PAGE_NAME}__df_overview"
+SS_TOC_CHECK = f"{PAGE_NAME}__df_check"
+SS_TOC_RESULT = f"{PAGE_NAME}__df_result"
+SS_TOC_SUMMARY = f"{PAGE_NAME}__summary"
+SS_TOC_VALID_TXT_BYTES = f"{PAGE_NAME}__valid_txt_bytes"
+SS_TOC_XLSX_BYTES = f"{PAGE_NAME}__xlsx_bytes"
+SS_TOC_XLSX_FILENAME = f"{PAGE_NAME}__xlsx_filename"
+SS_TOC_SOURCE = f"{PAGE_NAME}__source_filename"
+
+
+# ============================================================
+# common_lib（正本：ログイン/UI）
+# ============================================================
+from common_lib.ui.page_header import render_standard_page_header
+from common_lib.ui.input_source import render_input_source
 
 # ============================================================
 # lib（目次チェック：ローカル照合）
@@ -63,75 +78,112 @@ from lib.toc_check.toc_segments import (
     validate_segments,
     check_toc_by_order,
 )
-from lib.toc_check.explanation import render_toc_logic_expander
-
+from lib.toc_check.explanation import (
+    render_toc_page_intro,
+    render_toc_logic_expander,
+)
 
 # ============================================================
 # ページ設定（必須・統一）
 # ============================================================
-st.set_page_config(page_title="📄 目次チェック（ローカル照合）", page_icon="📄", layout="wide")
+st.set_page_config(page_title="📄 Text Studio", page_icon="📄", layout="wide")
 
-render_banner_line_by_key("purple_light")
-
-sub = page_session_heartbeat(
-    st,
-    PROJECTS_ROOT,
+# ============================================================
+# 共通ヘッダー
+# ============================================================
+sub, theme, BANNER_KEY, settings = render_standard_page_header(
+    st_module=st,
+    projects_root=PROJECTS_ROOT,
+    app_dir=APP_DIR,
     app_name=APP_NAME,
     page_name=PAGE_NAME,
+    title="📄 目次チェック",
+    subtitle_text="パターンマッチングによる目次チェック",
+    default_banner_key="purple_light",
 )
 
-left, right = st.columns([2, 1])
-with left:
-    st.title("📄 目次チェック")
-with right:
-    st.success(f"✅ ログイン中: **{sub}**")
+# ============================================================
+# ページ説明
+# ============================================================
+render_toc_page_intro()
 
-subtitle("（非AI / ローカル照合）")
-st.caption("目次候補（目次タイトルと頁）を本文に対して **行ごとに順番に** 照合します。")
-st.caption("AIは使用していません。安心して PDF を丸ごとアップロードできます。")
-st.caption(
-    "内部ではパターンマッチによる照合を行います。"
-    " 想定しないパターンでは結果が正しくない場合があります。"
-    " その際は **管理者に報告**してください（**プログラム修正**で対応します）。"
+# ============================================================
+# ロジック説明
+# ============================================================
+render_toc_logic_expander(
+    theme=theme,
 )
 
-#st.error("wordファイルの内部で目次の箇所が")
+# ============================================================
+# sidebar options
+# ============================================================
+with st.sidebar:
+
+    st.header("🔧 オプション")
+
+    toc_join_front = st.checkbox(
+        "目次抽出は冒頭10pを連結",
+        value=True,
+        help=(
+            "ON：先頭10ページを連結して目次候補を抽出します。\n"
+            "OFF：1ページ目のみを対象にします。"
+        ),
+    )
+
+    search_all_pages = st.checkbox(
+        "未検出時に全ページ探索も行う",
+        value=False,
+        help=(
+            "ON：頁ラベル一致が見つからない時に全ページ探索を行います。\n"
+            "OFF：通常探索のみを行います。"
+        ),
+    )
 
 # ============================================================
-# ロジック説明（expander）
+# 解析ファイル設定
 # ============================================================
-render_toc_logic_expander()
+st.divider()
+st.subheader("① PDFファイルの設定")
 
-# ============================================================
-# 入力（PDFアップロード + オプション）
-# - type を外して、自前で PDF チェックする
-# ============================================================
-uploaded = st.file_uploader("PDF をアップロード", type=None)
+input_result = render_input_source(
+    projects_root=PROJECTS_ROOT,
+    user_sub=sub,
+    page_name=PAGE_NAME,
+    key_prefix=f"{PAGE_NAME}__toc_input",
+    allowed_sources=["upload", "inbox"],
+    upload_types=["pdf"],
+    inbox_kinds=None,
+    inbox_extensions=["pdf"],
+    input_label="入力方法",
+    upload_label="PDF ファイル（.pdf）をアップロードしてください",
+    inbox_page_size=8,
+)
 
-c1, c2 = st.columns([1, 1])
-with c1:
-    toc_join_front = st.checkbox("目次抽出は冒頭10pを連結", value=True)
-with c2:
-    search_all_pages = st.checkbox("未検出時に全ページ探索も行う", value=False)
-
-run = st.button("▶ 解析・照合を実行", type="primary")
-
-# ============================================================
-# 実行トリガ（ボタンが押されていなければ何もしない）
-# ============================================================
-if not run:
+if not input_result.confirmed:
+    st.info("まずチェックするファイルを設定してください。")
     st.stop()
 
-# ============================================================
-# 入力チェック
-# ============================================================
-if uploaded is None:
-    st.warning("先に PDF ファイル（.pdf）をアップロードしてください。")
-    st.stop()
 
-suffix = Path(uploaded.name).suffix.lower()
-if suffix != ".pdf":
-    st.error("PDF 以外のファイルがアップロードされました。このページは PDF（.pdf）専用です。")
+# ============================================================
+# 解析・照合を実行
+# ============================================================
+st.divider()
+st.subheader("② 目次チェック")
+run = st.button(
+    "チェックを実行",
+    type="primary",
+    key=f"{PAGE_NAME}__run_toc_check",
+)
+
+# ============================================================
+# cached result check
+# ============================================================
+has_cached = (
+    bool(st.session_state.get(SS_TOC_RESULT_READY))
+    and st.session_state.get(SS_TOC_SOURCE) == input_result.file_name
+)
+
+if (not run) and (not has_cached):
     st.stop()
 
 # ============================================================
@@ -139,7 +191,9 @@ if suffix != ".pdf":
 # ============================================================
 with tempfile.TemporaryDirectory() as td:
     pdf_path = Path(td) / "input.pdf"
-    pdf_path.write_bytes(uploaded.getvalue())
+    pdf_path.write_bytes(
+        input_result.data_bytes
+    )
     pages_text = pdf_to_text_per_page(pdf_path)
 
 st.success(f"PDF 読み込み完了：ページ数 {len(pages_text)}")
@@ -257,12 +311,31 @@ with pd.ExcelWriter(xlsx_buf, engine="xlsxwriter") as writer:
 
     ws.freeze_panes(1, 0)
 
-base = uploaded.name.rsplit(".", 1)[0]
+base = input_result.file_name.rsplit(".", 1)[0]
 xlsx_filename = f"目次チェック_{base}.xlsx"
 
+# ============================================================
+# save result to session_state
+# ============================================================
+st.session_state[SS_TOC_RESULT_READY] = True
+st.session_state[SS_TOC_SOURCE] = input_result.file_name
+st.session_state[SS_TOC_LINES] = toc_lines
+st.session_state[SS_TOC_OVERVIEW] = df_overview
+st.session_state[SS_TOC_CHECK] = df_check
+st.session_state[SS_TOC_RESULT] = df_result
+st.session_state[SS_TOC_SUMMARY] = summary
+st.session_state[SS_TOC_XLSX_BYTES] = xlsx_buf.getvalue()
+st.session_state[SS_TOC_XLSX_FILENAME] = xlsx_filename
+
+
+# ============================================================
+# ③ 結果をダウンロード
+# ============================================================
+st.divider()
+st.subheader("③ 結果をダウンロード")
 st.download_button(
-    "📥 照合結果をExcelで保存 (.xlsx)",
-    data=xlsx_buf.getvalue(),
-    file_name=xlsx_filename,
+    "📥 結果をExcelで保存",
+    data=st.session_state[SS_TOC_XLSX_BYTES],
+    file_name=st.session_state[SS_TOC_XLSX_FILENAME],
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )

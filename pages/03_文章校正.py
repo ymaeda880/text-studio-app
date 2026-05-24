@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/03_文章校正.py
+# text_studio_app/pages/03_文章校正.py
 # ============================================================
 # 📝 文章校正（解析：校正方針の抽出）
 #
@@ -20,12 +20,13 @@
 from __future__ import annotations
 
 # ============================================================
-# imports（stdlib / typing）
+# imports（stdlib）
 # ============================================================
+from functools import lru_cache
 from pathlib import Path
 import sys
 from typing import Any
-from functools import lru_cache
+from io import BytesIO
 
 # ============================================================
 # imports（3rd party）
@@ -33,12 +34,18 @@ from functools import lru_cache
 import streamlit as st
 
 # ============================================================
-# ページ設定（最初に1回だけ）
+# ページ設定
+# - st.set_page_config は最初に1回だけ実行する
 # ============================================================
-st.set_page_config(page_title="Text Studio / 文章校正", page_icon="📝", layout="wide")
+st.set_page_config(
+    page_title="Text Studio / 文章校正",
+    page_icon="📝",
+    layout="wide",
+)
 
 # ============================================================
-# パス設定（テンプレ準拠）
+# パス設定
+# - common_lib / app lib を import できるようにする
 # ============================================================
 _THIS = Path(__file__).resolve()
 APP_DIR = _THIS.parents[1]
@@ -50,76 +57,82 @@ for p in (MONO_ROOT, PROJ_DIR, APP_DIR):
         sys.path.insert(0, str(p))
 
 PROJECTS_ROOT = MONO_ROOT
-APP_NAME = _THIS.parents[1].name
+APP_NAME = APP_DIR.name
 PAGE_NAME = _THIS.stem
 
 # ============================================================
-# common_lib（ログイン / busy / UI）
+# common_lib（ページ共通UI）
+# - header / banner / theme / login
 # ============================================================
-from common_lib.sessions.page_entry import page_session_heartbeat
-from common_lib.busy import busy_run
-from common_lib.ui.banner_lines import render_banner_line_by_key
-from common_lib.ui import render_run_summary_compact
+from common_lib.ui.page_header import render_standard_page_header
 
 # ============================================================
-# common_lib（AI：routing）
+# common_lib（AI実行管理）
+# - busy_run / 実行サマリ / usage反映
+# ============================================================
+from common_lib.busy import busy_run
+from common_lib.busy.apply_text_result import apply_text_result_to_busy
+from common_lib.ui import render_run_summary_compact
+from common_lib.ai.usage_extract import extract_text_in_out_tokens
+
+# ============================================================
+# common_lib（AI routing / model）
+# - providers 直叩き禁止
 # ============================================================
 from common_lib.ai.routing import call_text
-
-# ============================================================
-# common_lib（モデル選択：テンプレ準拠）
-# ============================================================
-from common_lib.ui.model_picker import render_text_model_picker
 from common_lib.ai.models import TEXT_MODEL_CATALOG, DEFAULT_TEXT_MODEL_KEY
+from common_lib.ui.model_picker import render_text_model_picker
 
 # ============================================================
-# common_lib（usage 抽出 / busy 後処理：テンプレ準拠）
-# ============================================================
-from common_lib.ai.usage_extract import extract_text_in_out_tokens
-from common_lib.busy.apply_text_result import apply_text_result_to_busy
-
-# ============================================================
-# common_lib（fx：ページ入力はさせない）
+# common_lib（費用・為替）
+# - ページ側で為替入力はさせない
 # ============================================================
 from common_lib.ai.costs.fx import get_default_usd_jpy
-from common_lib.ui.ui_basics import subtitle
 
 # ============================================================
-# lib（読込 / 貼り付け整形）※OCRなし
+# common_lib（File Input）
+# ============================================================
+from common_lib.ui.input_source import render_input_source
+
+# ============================================================
+# lib（テキスト読み込み）
 # ============================================================
 from lib.text_loaders import (
-    load_text_generic,
     extract_pdf_text,
     load_text_from_paste,
+    load_text_generic,
 )
 
 # ============================================================
 # lib（校正プロンプト）
 # ============================================================
 from lib.proofreading.prompts import (
-    MODE_DEFS,
     COMMON_PROMPT,
-    get_analyze_instruction,
+    MODE_DEFS,
     build_system_prompt,
+    get_analyze_instruction,
 )
 
 # ============================================================
-# lib（ヘルプ）
+# lib（校正説明UI）
 # ============================================================
-from lib.proofreading.explanation import render_proofreading_help_expander
+from lib.proofreading.explanation import (
+    render_proofreading_page_intro,
+    render_proofreading_help_expander,
+)
 
 # ============================================================
-# lib（UIユーティリティ）
+# lib（校正UIユーティリティ）
 # ============================================================
 from lib.proofreading.ui_utils import (
     display_pdf_bytes,
-    to_numbered_lines,
-    md_table_to_html,
     inject_proof_table_css,
+    md_table_to_html,
+    to_numbered_lines,
 )
 
 # ============================================================
-# lib（レポートビルダー）
+# lib（校正レポート出力）
 # ============================================================
 from lib.proofreading.report_builders import (
     build_policy_docx_bytes as build_policy_docx_bytes_core,
@@ -127,67 +140,56 @@ from lib.proofreading.report_builders import (
 )
 
 # ============================================================
-# common_lib Inbox（picker）
+# 共通ヘッダー
+# - settings.toml から BANNER_KEY を取得
+# - banner / theme / intro CSS を描画
+# - page_session_heartbeat を実行
+# - title / subtitle / ログイン状態を描画
 # ============================================================
-from common_lib.inbox.inbox_ui.file_picker import render_inbox_file_picker_no_toggle
-from common_lib.inbox.inbox_ui.file_picker import InboxPickedFile
+sub, theme, BANNER_KEY, settings = render_standard_page_header(
+    st_module=st,
+    projects_root=PROJECTS_ROOT,
+    app_dir=APP_DIR,
+    app_name=APP_NAME,
+    page_name=PAGE_NAME,
+    title="📝 文章校正",
+    subtitle_text="AIによる文章校正（InBox対応版）",
+    default_banner_key="navy_dark",
+)
 
 # ============================================================
-# 定数
+# ページ説明
+# ============================================================
+render_proofreading_page_intro()
+
+# ============================================================
+# ヘルプ
+# ============================================================
+render_proofreading_help_expander(
+    theme=theme,
+)
+
+
+# 🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪
+# ============================================================
+# ＜＜＜＜＜＜　前処理　
+# ============================================================
+# 🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪
+
+
+# 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+# ============================================================
+# 定数　／　session_state　
+# ============================================================
+# 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+
+# ============================================================
+# 定数（モデル / モード / Inbox）
 # ============================================================
 DEFAULT_MODEL_KEY = DEFAULT_TEXT_MODEL_KEY
 DEFAULT_MODE = "通常校正"
 INBOX_DEFAULT_MODE = "解析文書校正（通常校正）"
 INBOX_PAGE_SIZE = 8
-
-# ============================================================
-# バナー / ログイン（テンプレ準拠）
-# ============================================================
-render_banner_line_by_key("purple_light")
-
-sub = page_session_heartbeat(
-    st,
-    PROJECTS_ROOT,
-    app_name=APP_NAME,
-    page_name=PAGE_NAME,
-)
-
-left, right = st.columns([2, 1])
-with left:
-    st.title("📝 文章の校正")
-with right:
-    st.success(f"✅ ログイン中: **{sub}**")
-subtitle("InBox対応版")
-# ============================================================
-# 説明（caption）
-# ============================================================
-st.caption(
-    "word解析による中間テキストをinboxから読み込む時は，下の「入力方法」で「Inboxから」を選んでください．"
-    "「Inboxから」を選んだ時は，「解析モード」は自動的に「解析文書（標準）校正（通常校正）」にセットされますので，そのまま校正を行ってください．"
-)
-st.caption(
-    "テキストを貼り付ける時には，下の「入力方法」で「貼り付けテキスト」を選んでください．"
-    "この場合の「解析モード」は「通常校正」にセットされます．"
-    "「厳格校正」や「簡易校正」に変更する時は，サイドバーの解析モードを変更してください．"
-)
-st.caption(
-    "テキストファイルをdropする時は，下の「入力方法」で「ファイルから」を選んでください．"
-    "一度に校正するテキストは30,000文字程度に区切って（30,000文字以下のファイルをdropして）校正を行ってください．"
-)
-st.caption("個人情報や機密情報の入力は避けてください．")
-
-st.markdown(
-    "この文章校正アプリは， **継続的なプロンプトの調整が必要**です．"
-    "不適切な（誤った）指摘がAIよりなされたときは，"
-    "その時のwordの元ファイル，校正方針のPDFファイルを保存し，**管理者へ報告**してください．"
-    "プロンプトの調整を行います．ご協力よろしくお願いします．"
-)
-
-st.markdown(
-"AIそのものも日々能力向上を続けています。"
-"近い将来には、文章校正においても、利用者が十分に満足できる水準の結果を、短時間で提供できるようになると考えられます。"
-)
-
 
 # ============================================================
 # セッションキー（入力共通）
@@ -201,27 +203,6 @@ st.session_state.setdefault(K_SRC_NAME, "")
 st.session_state.setdefault(K_DO_ANALYZE, False)
 
 # ============================================================
-# セッションキー（ファイル選択変更検知）
-# - 次のファイルを選んだ瞬間に、確定プレビューを消す
-# ============================================================
-K_LAST_FILE_SIG = f"{PAGE_NAME}__last_file_sig"
-st.session_state.setdefault(K_LAST_FILE_SIG, "")
-
-# ============================================================
-# セッションキー（ファイル候補：選択中プレビュー用）
-# - ファイル選択時にここへ読み込み、未解析でもプレビュー表示する
-# - 「①解析（ファイル）」押下で K_SRC_TEXT に確定コピーする
-# ============================================================
-K_FILE_CAND_TEXT = f"{PAGE_NAME}__file_cand_text"
-K_FILE_CAND_NAME = f"{PAGE_NAME}__file_cand_name"
-K_FILE_CAND_SIG = f"{PAGE_NAME}__file_cand_sig"
-
-st.session_state.setdefault(K_FILE_CAND_TEXT, "")
-st.session_state.setdefault(K_FILE_CAND_NAME, "")
-st.session_state.setdefault(K_FILE_CAND_SIG, "")
-
-
-# ============================================================
 # セッションキー（busy_run）
 # ============================================================
 K_LAST_RUN_ID = f"{PAGE_NAME}__last_run_id"
@@ -229,21 +210,6 @@ K_LAST_RUN_ACTION = f"{PAGE_NAME}__last_run_action"
 
 st.session_state.setdefault(K_LAST_RUN_ID, "")
 st.session_state.setdefault(K_LAST_RUN_ACTION, "")
-
-# ============================================================
-# セッションキー（Inbox picker の選択保持）
-# ============================================================
-K_INBOX_BYTES = f"{PAGE_NAME}_inbox_bytes"
-K_INBOX_NAME = f"{PAGE_NAME}_inbox_name"
-K_INBOX_KIND = f"{PAGE_NAME}_inbox_kind"
-K_INBOX_ITEM = f"{PAGE_NAME}_inbox_item_id"
-K_INBOX_ADDED = f"{PAGE_NAME}_inbox_added_at"
-
-st.session_state.setdefault(K_INBOX_BYTES, b"")
-st.session_state.setdefault(K_INBOX_NAME, "")
-st.session_state.setdefault(K_INBOX_KIND, "")
-st.session_state.setdefault(K_INBOX_ITEM, "")
-st.session_state.setdefault(K_INBOX_ADDED, "")
 
 # ============================================================
 # セッションキー（usage/cost：推計しない）
@@ -275,15 +241,6 @@ st.session_state.setdefault("proof_mode", DEFAULT_MODE)
 st.session_state.setdefault("pasted_text", "")
 st.session_state.setdefault("extra_user_prompt", "")
 
-# ============================================================
-# 入力方式（radio）
-# ============================================================
-K_INPUT_METHOD = f"{PAGE_NAME}_input_method"
-INPUT_PASTE = "📝 貼り付けテキスト"
-INPUT_FILE = "📁 ファイルから"
-INPUT_INBOX = "📥 Inboxから"
-st.session_state.setdefault(K_INPUT_METHOD, INPUT_PASTE)
-
 
 def _on_change_input_method() -> None:
     # ------------------------------------------------------------
@@ -295,6 +252,12 @@ def _on_change_input_method() -> None:
     else:
         st.session_state["proof_mode"] = DEFAULT_MODE
 
+
+# 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
+# ============================================================
+# helper関数
+# ============================================================
+# 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
 
 # ============================================================
 # helper：model_key -> (provider, model)
@@ -363,16 +326,17 @@ def render_policy_preview(*, mode: str) -> str:
             return extra
 
 
+# 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
 # ============================================================
-# ヘルプ
+# サイドバー
 # ============================================================
-render_proofreading_help_expander()
+# 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
 
 # ============================================================
 # Sidebar（設定）
 # ============================================================
 with st.sidebar:
-    st.header("設定")
+    #st.header("設定")
 
     # ------------------------------------------------------------
     # モデル選択（テンプレ準拠）
@@ -380,7 +344,7 @@ with st.sidebar:
     # - 実行時エラーは common_lib 側で扱う
     # ------------------------------------------------------------
     _ = render_text_model_picker(
-        title="🧠 使用モデル",
+        title="🧠 使用モデル選択",
         catalog=TEXT_MODEL_CATALOG,
         session_key=K_MODEL_KEY,
         default_key=DEFAULT_MODEL_KEY,
@@ -388,7 +352,6 @@ with st.sidebar:
         gemini_available=_gemini_available(),
     )
    
-
     # ------------------------------------------------------------
     # 解析モード
     # ------------------------------------------------------------
@@ -403,119 +366,161 @@ with st.sidebar:
     # ------------------------------------------------------------
     # ダウンロード形式
     # ------------------------------------------------------------
-    _DL_LABELS = {"pdf": "PDF (.pdf)", "word": "Word (.docx)"}
+    st.header("📦 ダウンロード形式設定")
+    _DL_LABELS = {"pdf": "PDF", "word": "Word"}
     dl_choice_key = st.radio(
-        "📦 ダウンロード形式（解析レポート）",
+        "ダウンロード形式（解析レポート）",
         options=list(_DL_LABELS.keys()),
         format_func=lambda k: _DL_LABELS[k],
         index=0,
         key="dl_format_radio",
+        label_visibility="collapsed",
     )
+
+
+# 🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪
+# ============================================================
+# ＜＜＜＜＜＜　メイン処理　
+# ============================================================
+# 🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪
 
 # ============================================================
 # extra prompt（expander内のテキストエリア）
 # ============================================================
+st.divider()
+st.subheader("プロンプトの追加設定（任意）")
 extra_prompt = render_policy_preview(mode=st.session_state["proof_mode"])
 
 st.divider()
+st.subheader("① 校正文章の設定")
 
 # ============================================================
-# 確定済み入力（①解析ボタンで確定した正本）だけを参照
-# - プレビューは「確定済み(K_SRC_TEXT)」のみ表示する
+# 入力ソース選択（正本UI）
+# - paste / upload / inbox のUIだけ common_lib に寄せる
+# - ファイル内容の解釈・抽出はこのページ側で行う
 # ============================================================
-src_text = str(st.session_state.get(K_SRC_TEXT) or "").strip()
-used_file_name: str | None = None
-if src_text:
-    used_file_name = str(st.session_state.get(K_SRC_NAME) or "").strip() or "input.txt"
-
-
-# ============================================================
-# 入力（radio：貼り付け / ファイル / Inbox）
-# ============================================================
-picked_method = st.radio(
-    "入力方法　(InBoxのファイルを構成するときは「inboxから」を選択してください．)",
-    [INPUT_PASTE, INPUT_FILE, INPUT_INBOX],
-    key=K_INPUT_METHOD,
-    horizontal=True,
-    on_change=_on_change_input_method,
+input_result = render_input_source(
+    projects_root=PROJECTS_ROOT,
+    user_sub=sub,
+    page_name=PAGE_NAME,
+    key_prefix=f"{PAGE_NAME}__proof_input",
+    allowed_sources=["paste", "upload", "inbox"],
+    upload_types=["docx", "txt", "pdf"],
+    inbox_kinds=None,
+    inbox_extensions=["docx", "txt", "pdf"],
+    input_label="入力方法　(InBoxのファイルを校正するときは「inboxから」を選択してください．)",
+    paste_label="ここに本文を貼り付け",
+    upload_label=".docx / .txt / .pdf をアップロード",
+    #confirm_button_label="① 解析",
+    inbox_page_size=INBOX_PAGE_SIZE,
 )
 
+if not input_result.confirmed:
+    st.info("まず校正テキストを設定してください。")
+    st.stop()
+
 # ============================================================
-# ① ファイルから
+# 解析ボタン
 # ============================================================
-if picked_method == INPUT_FILE:
-    up = st.file_uploader(
-        ".docx / .txt / .pdf をアップロード",
-        type=["docx", "txt", "pdf"],
-        key=f"{PAGE_NAME}_uploader",
+
+st.divider()
+st.subheader("② 文章校正")
+run_clicked = st.button(
+    "文章校正",
+    type="primary",
+    key=f"{PAGE_NAME}__run_proof",
+)
+
+if not run_clicked:
+    st.stop()
+
+current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
+st.markdown(
+    f"""
+    <div style="
+        padding:6px 10px;
+        border-radius:6px;
+        background-color:#ffe9c6;
+        color:#8a4b0f;
+        font-weight:bold;
+        font-size:0.95rem;
+        border:1px solid #f0b76a;
+        white-space:nowrap;
+        display:inline-block;
+    ">
+        🧭 解析モード：{current_mode}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown(
+        "<div style='height:16px'></div>",
+        unsafe_allow_html=True,
     )
 
-    col_mode, col_btn = st.columns([3, 1])
-    with col_mode:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-                display:inline-block;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
+
+# ============================================================
+# 入力確定時：ページ側でテキスト化する
+# - common_lib はファイルをそのまま返すだけ
+# ============================================================
+K_LAST_ACCEPTED_INPUT_SIG = f"{PAGE_NAME}__last_accepted_input_sig"
+
+st.session_state.setdefault(
+    K_LAST_ACCEPTED_INPUT_SIG,
+    "",
+)
+
+input_sig = (
+    f"{input_result.source_type}|"
+    f"{input_result.file_name}|"
+    f"{len(input_result.data_bytes or b'')}|"
+    f"{len(input_result.text or '')}"
+)
+
+if (
+    input_result.confirmed
+    and st.session_state[K_LAST_ACCEPTED_INPUT_SIG] != input_sig
+):
+
+    #st.session_state[K_LAST_ACCEPTED_INPUT_SIG] = input_sig
+
+    src_text_new = ""
+    used_file_name_new = input_result.file_name or "input.txt"
+
+    src_text_new = ""
+    used_file_name_new = input_result.file_name or "input.txt"
+
+    # ------------------------------------------------------------
+    # paste
+    # ------------------------------------------------------------
+    if input_result.source_type == "paste":
+        src_text_new = load_text_from_paste(
+            input_result.text,
+            normalize=True,
+            collapse_blanks=False,
+            keep_blank_lines=1,
+            trim_trailing=True,
         )
+        used_file_name_new = "pasted_text.txt"
 
-    with col_btn:
-        do_analyze_file = st.button(
-            "① 解析（ファイル）",
-            type="primary",
-            disabled=not up,
-            key="btn_analyze_file",
-        )
-
-    if up:
-  
-        # ------------------------------------------------------------
-        # ファイル選択シグネチャ（選択が変わったら候補/確定をクリア）
-        # ------------------------------------------------------------
-        sig = f"{up.name}:{getattr(up, 'size', 0)}"
-        if str(st.session_state.get(K_LAST_FILE_SIG) or "") != sig:
-            st.session_state[K_LAST_FILE_SIG] = sig
-
-            # 確定（前のプレビュー）を必ず消す
-            st.session_state[K_SRC_TEXT] = ""
-            st.session_state[K_SRC_NAME] = ""
-            st.session_state[K_DO_ANALYZE] = False
-
-            # 候補もクリア
-            st.session_state[K_FILE_CAND_TEXT] = ""
-            st.session_state[K_FILE_CAND_NAME] = ""
-            st.session_state[K_FILE_CAND_SIG] = ""
-
-        # ------------------------------------------------------------
-        # 候補の読み込み（未解析でもプレビューに出す）
-        # - up.read() は使わない（rerunで空になりやすい）
-        # ------------------------------------------------------------
-        data_bytes = up.getvalue()
+    # ------------------------------------------------------------
+    # upload / inbox
+    # ------------------------------------------------------------
+    else:
+        data_bytes = input_result.data_bytes or b""
         if not data_bytes:
-            st.warning("ファイルの読み込みに失敗しました（0バイト）。もう一度選択してください。")
+            st.warning("ファイルの読み込みに失敗しました（0バイト）。")
             st.stop()
 
-        fn = up.name or "input.txt"
+        fn = input_result.file_name or "input_file"
         lower = fn.lower()
 
-        cand_text = ""
         if lower.endswith(".pdf"):
-            # PDFはプレビューも表示
             st.subheader("📄 PDFプレビュー")
-            display_pdf_bytes(data_bytes, height=600)
+            display_pdf_bytes(
+                data_bytes,
+                height=600,
+            )
 
             try:
                 stats = extract_pdf_text(data_bytes)
@@ -524,206 +529,43 @@ if picked_method == INPUT_FILE:
                 st.stop()
 
             if int(stats.get("visible", 0)) < 20:
-                st.warning("このPDFは画像PDF（テキスト層なし）と判定しました。OCRツールでテキスト化してから再度お試しください。")
+                st.warning(
+                    "このPDFは画像PDF（テキスト層なし）と判定しました。"
+                    "OCRツールでテキスト化してから再度お試しください。"
+                )
                 st.stop()
 
-            cand_text = (stats.get("text") or "").strip()
+            src_text_new = str(stats.get("text") or "").strip()
 
         else:
-            from io import BytesIO
             pseudo = BytesIO(data_bytes)
             pseudo.name = fn
+
             try:
-                cand_text = load_text_generic(pseudo)
+                src_text_new = load_text_generic(pseudo)
             except RuntimeError as e:
                 st.error(str(e))
                 st.stop()
-            cand_text = str(cand_text or "").strip()
 
-        if not cand_text:
-            st.warning("テキストを取得できませんでした。別のファイルでお試しください。")
-            st.stop()
+            src_text_new = str(src_text_new or "").strip()
 
-        # 候補として保存（未解析プレビュー用）
-        st.session_state[K_FILE_CAND_TEXT] = cand_text
-        st.session_state[K_FILE_CAND_NAME] = fn
-        st.session_state[K_FILE_CAND_SIG] = sig
-
-        # ------------------------------------------------------------
-        # 「①解析（ファイル）」押下：候補 → 確定
-        # ------------------------------------------------------------
-        if do_analyze_file:
-            st.session_state[K_SRC_TEXT] = str(st.session_state.get(K_FILE_CAND_TEXT) or "")
-            st.session_state[K_SRC_NAME] = str(st.session_state.get(K_FILE_CAND_NAME) or "input.txt")
-            st.session_state[K_DO_ANALYZE] = True
-            st.rerun()
-
-
-# ============================================================
-# ② 貼り付けテキスト（デフォルト）
-# ============================================================
-elif picked_method == INPUT_PASTE:
-    pasted = st.text_area(
-        "ここに本文を貼り付け",
-        height=260,
-        key="pasted_text",
-        placeholder="ここに本文を貼り付けてください（改行は保持されます）。",
-    )
-
-    col_mode2, col_btn2 = st.columns([3, 1])
-    with col_mode2:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                display:inline-block;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_btn2:
-        do_analyze_paste = st.button(
-            "① 解析（貼り付け）",
-            type="primary",
-            key="btn_analyze_paste",
-        )
-
-    if do_analyze_paste:
-        if not str(pasted or "").strip():
-            st.warning("テキストを貼り付けてください。")
-            st.stop()
-
-        src_text = load_text_from_paste(
-            pasted,
-            normalize=True,
-            collapse_blanks=False,
-            keep_blank_lines=1,
-            trim_trailing=True,
-        )
-        used_file_name = "pasted_text.txt"
-
-        st.session_state[K_SRC_TEXT] = str(src_text or "").strip()
-        st.session_state[K_SRC_NAME] = used_file_name
-        st.session_state[K_DO_ANALYZE] = True
-
-# ============================================================
-# ③ Inboxから
-# ============================================================
-else:
-    picked: InboxPickedFile | None = render_inbox_file_picker_no_toggle(
-        projects_root=PROJECTS_ROOT,
-        user_sub=sub,
-        key_prefix=f"{PAGE_NAME}_proof_inbox_picker",
-        page_size=INBOX_PAGE_SIZE,
-        kinds=["text"],
-        show_kind_in_label=True,
-        show_added_at_in_label=True,
-    )
-
-    if picked is not None:
-        st.session_state[K_INBOX_BYTES] = picked.data_bytes or b""
-        st.session_state[K_INBOX_NAME] = picked.original_name or "inbox_text.txt"
-        st.session_state[K_INBOX_KIND] = picked.kind or "text"
-        st.session_state[K_INBOX_ITEM] = str(picked.item_id or "")
-        st.session_state[K_INBOX_ADDED] = str(getattr(picked, "added_at", "") or "")
-        st.success("✅ Inbox から読み込みました（選択結果を保持しました）")
-
-    kept_bytes: bytes = st.session_state.get(K_INBOX_BYTES, b"") or b""
-    kept_name: str = st.session_state.get(K_INBOX_NAME, "") or ""
-
+        used_file_name_new = fn
 
     # ------------------------------------------------------------
-    # Inbox「選択ファイルを読み込む」結果（K_INBOX_BYTES）→ 候補プレビューへ反映
-    # - readボタンがどこにあっても、bytes が更新されればここで候補を作る
-    # - rerun ループ防止：K_FILE_CAND_SIG で同一アイテムは再処理しない
+    # 入力チェック
     # ------------------------------------------------------------
-    inbox_item_id = str(st.session_state.get(K_INBOX_ITEM) or "")
-    inbox_sig = f"inbox:{inbox_item_id}:{len(kept_bytes)}"
+    if not str(src_text_new or "").strip():
+        st.warning("テキストを取得できませんでした。別の入力でお試しください。")
+        st.stop()
 
-    if kept_bytes and inbox_item_id and str(st.session_state.get(K_FILE_CAND_SIG) or "") != inbox_sig:
-        cand_text = str(_decode_text_bytes(kept_bytes) or "").strip()
-
-        if cand_text:
-            # 前の確定（解析用）プレビューを消して、候補を表示させる
-            st.session_state[K_SRC_TEXT] = ""
-            st.session_state[K_SRC_NAME] = ""
-            st.session_state[K_DO_ANALYZE] = False
-
-            # 候補プレビューを作る
-            st.session_state[K_FILE_CAND_TEXT] = cand_text
-            st.session_state[K_FILE_CAND_NAME] = kept_name or "inbox_text.txt"
-            st.session_state[K_FILE_CAND_SIG] = inbox_sig
-
-            st.rerun()
-
-
-    col_mode3, col_btn3 = st.columns([3, 1])
-
-    with col_mode3:
-        current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-        st.markdown(
-            f"""
-            <div style="
-                padding:6px 10px;
-                border-radius:6px;
-                background-color:#ffe9c6;
-                color:#8a4b0f;
-                font-weight:bold;
-                font-size:0.95rem;
-                border:1px solid #f0b76a;
-                white-space:nowrap;
-                display:inline-block;
-            ">
-                🧭 解析モード：{current_mode}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with col_btn3:
-        analyze_inbox_clicked = st.button(
-            "① 解析（Inbox）",
-            type="primary",
-            disabled=(not bool(kept_bytes)),
-            key="btn_analyze_inbox",
-        )
-
-    if analyze_inbox_clicked:
-        if not kept_bytes:
-            st.warning("Inbox からテキストを選択してください。")
-            st.stop()
-
-        try:
-            txt = _decode_text_bytes(kept_bytes)
-            src_text_new = str(txt or "").strip()
-            used_file_name = kept_name or "inbox_text.txt"
-
-            if not src_text_new:
-                st.warning("テキストが空でした（0文字）。別のファイルを選択してください。")
-                st.stop()
-
-            # ①解析押下で確定
-            st.session_state[K_SRC_TEXT] = src_text_new
-            st.session_state[K_SRC_NAME] = used_file_name
-            st.session_state[K_DO_ANALYZE] = True
-
-            st.success("Inbox テキストを確定しました。解析を開始します。")
-
-        except Exception as e:
-            st.error(f"Inbox テキストの読み込み/変換に失敗しました: {e}")
-            st.stop()
-
+    # ------------------------------------------------------------
+    # 解析用正本へ確定
+    # - テキスト化に成功した後だけ処理済み signature を記録する
+    # ------------------------------------------------------------
+    st.session_state[K_SRC_TEXT] = str(src_text_new or "").strip()
+    st.session_state[K_SRC_NAME] = used_file_name_new
+    st.session_state[K_DO_ANALYZE] = True
+    st.session_state[K_LAST_ACCEPTED_INPUT_SIG] = input_sig
 
 # ============================================================
 # 解析の実行
@@ -737,17 +579,17 @@ numbered_preview: str = ""
 # - 無ければ、ファイル候補（K_FILE_CAND_TEXT）を表示
 # ------------------------------------------------------------
 confirmed_text = str(st.session_state.get(K_SRC_TEXT) or "").strip()
-candidate_text = str(st.session_state.get(K_FILE_CAND_TEXT) or "").strip()
-preview_text = confirmed_text or candidate_text
+preview_text = confirmed_text
 
 if preview_text:
     lines = to_numbered_lines(preview_text)
 
-    st.subheader("👀 行番号付きプレビュー（テキスト表示）")
+    st.markdown("##### 行番号付きプレビュー（テキスト表示）")
     st.text_area(
         "原文（番号付きプレビュー）",
         value=_render_numbered_preview_no_paging(lines),
         height=260,
+        label_visibility="collapsed",
     )
 
 want_analyze = bool(st.session_state.pop(K_DO_ANALYZE, False))
@@ -820,7 +662,7 @@ if want_analyze:
             meta={
                 "feature": "proofreading_policy",
                 "action": "analyze_policy",
-                "input_method": str(picked_method),
+                "input_method": str(input_result.source_type),
                 "input_chars": len(src_text or ""),
                 "lines": len(lines),
                 "mode": mode,
@@ -890,7 +732,8 @@ if want_analyze:
     # - レポート生成側が usd_jpy を要求するため、fx正本から取得して渡す（ページ入力はしない）
     # - cost は推計しない（builders側の表示仕様に従う）
     # ============================================================
-    st.markdown("### ⤵️ 解析レポートをダウンロード")
+    st.divider()
+    st.markdown("### ③ 校正方針をダウンロード")
 
     file_base = (used_file_name or "pasted_text").rsplit(".", 1)[0]
     mode_label = mode.replace(" ", "")
@@ -932,7 +775,7 @@ if want_analyze:
         )
         if pdf_bytes:
             st.download_button(
-                "PDF（.pdf）として保存",
+                "PDFとして保存",
                 data=pdf_bytes,
                 file_name=f"{file_stub}.pdf",
                 mime="application/pdf",
@@ -964,7 +807,7 @@ if want_analyze:
             else "text/plain",
             key=f"dl_word_{file_stub}",
         )
-
+        
 # ------------------------------------------------------------
 # 何も入力が無いときだけ案内を出す
 # ------------------------------------------------------------

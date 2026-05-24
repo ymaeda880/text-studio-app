@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/44_頁テキスト抽出.py
+# text_studio_app/pages/44_頁テキスト抽出.py
 # 目的：
 #   単独行の頁ラベル抽出 → 連番チェック(valid=True) のページ本文をTXTに結合。
 #   ★ 追加要件：page_label が無いページも必ず出力（headerは page_label=None）。
