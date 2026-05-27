@@ -47,9 +47,8 @@ google-genai
 #   brew install tesseract-lang tesseract-lang-jpn
 
 # JWT トークン検証に必要（jwt_utilsで利用）
-PyJWT>=2.9.0
+#PyJWT>=2.9.0
 extra-streamlit-components
 
 werkzeug
-
 PyJWT

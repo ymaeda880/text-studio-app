@@ -76,15 +76,19 @@ INPUT_INTERNAL = "💾 内部保存から"
 INBOX_PAGE_SIZE = 8
 
 # ============================================================
-# common_lib（ログイン / UI / AI / busy）
+# common_lib（ログイン / AI / busy）
 # ============================================================
-from common_lib.ui.page_header import render_standard_page_header
-from common_lib.ui import render_run_summary_compact
-from common_lib.ui.model_picker import render_text_model_picker
 from common_lib.ai.models import TEXT_MODEL_CATALOG, DEFAULT_TEXT_MODEL_KEY
 
 from common_lib.inbox.inbox_ui.file_picker import render_inbox_file_picker_no_toggle
 from common_lib.inbox.inbox_ui.file_picker import InboxPickedFile
+
+# ============================================================
+# imports（UI）
+# ============================================================
+from common_lib.ui.page_header import render_standard_page_header
+from common_lib.ui import render_run_summary_compact
+from common_lib.ui.model_picker import render_text_model_picker
 
 # ============================================================
 # app config
@@ -149,7 +153,7 @@ from lib.ai_reference_check.explanation import (
 # ページ設定
 # ============================================================
 st.set_page_config(
-    page_title="🧠 AI図表チェック",
+    page_title="Text Studio / AI図表チェック",
     page_icon="🧠",
     layout="wide",
 )
@@ -568,16 +572,25 @@ if isinstance(df_input_saved, pd.DataFrame) and not df_input_saved.empty:
 else:
     st.info("まずAI用サマリーJSONLをアップロードして、「① JSONLを読み込む」を押してください。")
 
+
 # ============================================================
 # AI判定ボタン
-# - 入力データ一覧の下に表示
+# - JSONL読込後だけ表示
 # ============================================================
-st.divider()
-st.subheader("② AIで図表参照チェック")
-run_ai = st.button(
-    "AIで図表チェック",
-    disabled=not bool(st.session_state.get("ai_ref_records")),
-)
+if bool(st.session_state.get("ai_ref_records")):
+
+    st.divider()
+    st.subheader("② AIで図表参照チェック")
+
+    run_ai = st.button(
+        "AIで図表チェック",
+        disabled=False,
+        type="primary",
+    )
+
+else:
+    run_ai = False
+
 # ============================================================
 # ② AI判定
 # ============================================================
@@ -714,8 +727,9 @@ xlsx_bytes_saved = st.session_state.get("ai_ref_xlsx_bytes") or b""
 usage_rows_saved = st.session_state.get("ai_ref_usage_rows") or []
 
 if isinstance(df_result_saved, pd.DataFrame) and not df_result_saved.empty:
-    st.divider()
-    st.subheader("② AI図表参照判定結果")
+    #st.divider()
+    #st.markdownsubheader("AI図表参照判定結果")
+    st.markdown("#### AI図表参照判定結果")
 
     judgment_col = "AI判定"
 
@@ -796,31 +810,6 @@ if isinstance(df_result_saved, pd.DataFrame) and not df_result_saved.empty:
         default=str,
     )
 
-    with st.sidebar:
-        st.divider()
-        st.subheader("結果DL")
-
-        st.download_button(
-            "📘 AI図表チェック結果（xlsx）",
-            data=xlsx_bytes_saved,
-            file_name=f"AI図表チェック_{base}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-        st.download_button(
-            "📄 AI図表チェック結果（csv）",
-            data=csv_buf.getvalue().encode("utf-8-sig"),
-            file_name=f"AI図表チェック_{base}.csv",
-            mime="text/csv",
-        )
-
-        st.download_button(
-            "🧾 AI図表チェック結果JSON",
-            data=result_json_text.encode("utf-8"),
-            file_name=f"AI図表チェック_{base}.json",
-            mime="application/json",
-        )
-
 # ============================================================
 # 直近実行サマリ
 # ============================================================
@@ -844,6 +833,54 @@ if last_run_id:
         show_divider=True,
     )
 
+# ============================================================
+# 結果DL（右パネル最下部）
+# ============================================================
+if isinstance(df_result_saved, pd.DataFrame) and not df_result_saved.empty:
+    st.divider()
+    st.subheader("③ 結果のダウンロード")
+
+    base = Path(source_file_saved or "input").stem
+
+    csv_buf = io.StringIO()
+    df_result_saved.to_csv(csv_buf, index=False)
+
+    result_json_text = json.dumps(
+        st.session_state.get("ai_ref_result_objects") or [],
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+    )
+
+    st.download_button(
+        "📘 AI図表チェック結果（xlsx）",
+        data=xlsx_bytes_saved,
+        file_name=f"AI図表チェック_{base}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+# ============================================================
+# 結果DL（サイドバー：csv / json）
+# ============================================================
+if isinstance(df_result_saved, pd.DataFrame) and not df_result_saved.empty:
+    with st.sidebar:
+        st.divider()
+        st.subheader("結果のダウンロード")
+
+        st.download_button(
+            "📄 AI図表チェック結果（csv）",
+            data=csv_buf.getvalue().encode("utf-8-sig"),
+            file_name=f"AI図表チェック_{base}.csv",
+            mime="text/csv",
+        )
+
+        st.download_button(
+            "🧾 AI図表チェック結果JSON",
+            data=result_json_text.encode("utf-8"),
+            file_name=f"AI図表チェック_{base}.json",
+            mime="application/json",
+        )
+        
 # ============================================================
 # デバッグ
 # ============================================================
