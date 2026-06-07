@@ -256,21 +256,6 @@ st.session_state.setdefault(K_LAST_DOCX_NAME, "")
 st.session_state.setdefault(K_LAST_REPORT_ORIGIN, {})
 
 # ============================================================
-# セッションキー（校正結果保持）
-# ============================================================
-K_LAST_PLAN_MD = f"{PAGE_NAME}__last_plan_md"
-K_LAST_NUMBERED_PREVIEW = f"{PAGE_NAME}__last_numbered_preview"
-K_LAST_USED_FILE_NAME = f"{PAGE_NAME}__last_used_file_name"
-K_LAST_MODE = f"{PAGE_NAME}__last_mode"
-K_LAST_CHOSEN_MODEL = f"{PAGE_NAME}__last_chosen_model"
-
-st.session_state.setdefault(K_LAST_PLAN_MD, "")
-st.session_state.setdefault(K_LAST_NUMBERED_PREVIEW, "")
-st.session_state.setdefault(K_LAST_USED_FILE_NAME, "")
-st.session_state.setdefault(K_LAST_MODE, "")
-st.session_state.setdefault(K_LAST_CHOSEN_MODEL, "")
-
-# ============================================================
 # セッションキー（テンプレ準拠：model_key）
 # ============================================================
 K_MODEL_KEY = f"{PAGE_NAME}__model_key"
@@ -343,44 +328,30 @@ def _render_numbered_preview_no_paging(lines: list[str]) -> str:
 # ============================================================
 # 解析プロンプト表示（expander）
 # ============================================================
-# def render_policy_preview(*, mode: str) -> str:
-#     analyze_base = get_analyze_instruction(mode)
-
-#     with st.expander("🧭 解析プロンプト設定（クリックで展開）", expanded=False):
-#         tab3, tab1, tab2 = st.tabs(["✍️ 追加プロンプト", "🧭 System", "📋 共通方針"])
-
-#         with tab1:
-#             st.markdown("#### 🧭 解析プロンプト（解析モード）")
-#             st.code(analyze_base, language="markdown")
-
-#         with tab2:
-#             st.markdown("#### 📋 共通方針（毎回付与）")
-#             st.code(COMMON_PROMPT.strip(), language="markdown")
-
-#         with tab3:
-#             st.markdown("#### ✍️ 追加プロンプト（任意）")
-#             extra = st.text_area(
-#                 "追加プロンプトを入力",
-#                 key="extra_user_prompt",
-#                 placeholder="例）外来語はカタカナ優先。製品名や固有名詞は原文どおりに保持。",
-#                 height=100,
-#             ) or ""
-#             return extra
-
-# ============================================================
-# 追加プロンプト入力
-# ============================================================
 def render_policy_preview(*, mode: str) -> str:
+    analyze_base = get_analyze_instruction(mode)
 
-    return (
-        st.text_area(
-            "追加プロンプト（任意）",
-            key="extra_user_prompt",
-            placeholder="例）外来語はカタカナ優先。製品名や固有名詞は原文どおりに保持。",
-            height=100,
-        )
-        or ""
-    )
+    with st.expander("🧭 解析プロンプト設定（クリックで展開）", expanded=False):
+        tab3, tab1, tab2 = st.tabs(["✍️ 追加プロンプト", "🧭 System", "📋 共通方針"])
+
+        with tab1:
+            st.markdown("#### 🧭 解析プロンプト（解析モード）")
+            st.code(analyze_base, language="markdown")
+
+        with tab2:
+            st.markdown("#### 📋 共通方針（毎回付与）")
+            st.code(COMMON_PROMPT.strip(), language="markdown")
+
+        with tab3:
+            st.markdown("#### ✍️ 追加プロンプト（任意）")
+            extra = st.text_area(
+                "追加プロンプトを入力",
+                key="extra_user_prompt",
+                placeholder="例）外来語はカタカナ優先。製品名や固有名詞は原文どおりに保持。",
+                height=100,
+            ) or ""
+            return extra
+
 
 # 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
 # ============================================================
@@ -430,7 +401,7 @@ with st.sidebar:
 # extra prompt（expander内のテキストエリア）
 # ============================================================
 st.divider()
-#st.markdown("##### プロンプトの追加設定（任意）")
+st.subheader("プロンプトの追加設定（任意）")
 extra_prompt = render_policy_preview(mode=st.session_state["proof_mode"])
 
 st.divider()
@@ -474,8 +445,10 @@ run_clicked = st.button(
 )
 
 
-# if not run_clicked:
-#     st.stop()
+
+
+if not run_clicked:
+    st.stop()
 
 
 current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
@@ -525,21 +498,6 @@ if (
     input_result.confirmed
     and st.session_state[K_LAST_ACCEPTED_INPUT_SIG] != input_sig
 ):
-
-    # ------------------------------------------------------------
-    # 入力変更時は前回結果を破棄
-    # ------------------------------------------------------------
-    st.session_state[K_LAST_PLAN_MD] = ""
-    st.session_state[K_LAST_NUMBERED_PREVIEW] = ""
-    st.session_state[K_LAST_USED_FILE_NAME] = ""
-    st.session_state[K_LAST_MODE] = ""
-    st.session_state[K_LAST_CHOSEN_MODEL] = ""
-
-    st.session_state[K_LAST_PDF_BYTES] = None
-    st.session_state[K_LAST_DOCX_BYTES] = None
-    st.session_state[K_LAST_PDF_NAME] = ""
-    st.session_state[K_LAST_DOCX_NAME] = ""
-    st.session_state[K_LAST_REPORT_ORIGIN] = {}
 
     #st.session_state[K_LAST_ACCEPTED_INPUT_SIG] = input_sig
 
@@ -658,14 +616,6 @@ if preview_text:
 # ------------------------------------------------------------
 want_analyze = bool(run_clicked)
 
-# ------------------------------------------------------------
-# 何も結果が無い場合だけ停止
-# ------------------------------------------------------------
-if (
-    not run_clicked
-    and not st.session_state.get(K_LAST_PLAN_MD)
-):
-    st.stop()
 
 if want_analyze:
 
@@ -697,16 +647,6 @@ if want_analyze:
     st.session_state[K_LAST_NOTE] = ""
     st.session_state[K_LAST_RUN_ID] = ""
     st.session_state[K_LAST_RUN_ACTION] = ""
-
-    # ------------------------------------------------------------
-    # 生成済みレポートをクリア
-    # - 再実行時に前回のPDF/Wordが残らないようにする
-    # ------------------------------------------------------------
-    st.session_state[K_LAST_PDF_BYTES] = None
-    st.session_state[K_LAST_DOCX_BYTES] = None
-    st.session_state[K_LAST_PDF_NAME] = ""
-    st.session_state[K_LAST_DOCX_NAME] = ""
-    st.session_state[K_LAST_REPORT_ORIGIN] = {}
 
     # ------------------------------------------------------------
     # System / prompt（ページ責務：方針の組み立て）
@@ -766,24 +706,6 @@ if want_analyze:
 
             plan_md = (getattr(res, "text", "") or "").strip()
 
-            # ------------------------------------------------------------
-            # 校正結果を保持
-            # ------------------------------------------------------------
-            st.session_state[K_LAST_PLAN_MD] = plan_md
-            st.session_state[K_LAST_NUMBERED_PREVIEW] = numbered_preview
-            st.session_state[K_LAST_USED_FILE_NAME] = used_file_name
-            st.session_state[K_LAST_MODE] = mode
-            st.session_state[K_LAST_CHOSEN_MODEL] = model_key
-
-            # ------------------------------------------------------------
-            # 新しい結果でレポート再生成
-            # ------------------------------------------------------------
-            st.session_state[K_LAST_PDF_BYTES] = None
-            st.session_state[K_LAST_DOCX_BYTES] = None
-            st.session_state[K_LAST_PDF_NAME] = ""
-            st.session_state[K_LAST_DOCX_NAME] = ""
-            st.session_state[K_LAST_REPORT_ORIGIN] = {}
-
             pp = apply_text_result_to_busy(
                 br=br,
                 res=res,
@@ -802,29 +724,19 @@ if want_analyze:
         st.error(f"実行に失敗しました: {e}")
         st.stop()
 
-# ============================================================
-# 校正結果表示
-# - session_state を正本にする
-# - rerun後も結果・実行サマリ・保存ボタンを残す
-# ============================================================
-if st.session_state.get(K_LAST_PLAN_MD):
+    st.success("解析が完了しました。行番号/理由つきで方針を表示します。")
 
-    if want_analyze:
-        st.success("解析が完了しました。行番号/理由つきで方針を表示します。")
-
+    # ============================================================
+    # 校正方針 表示
+    # ============================================================
     st.subheader("📋 校正方針")
-
-    html_table = md_table_to_html(
-        st.session_state[K_LAST_PLAN_MD]
-    )
-
+    html_table = md_table_to_html(plan_md)
     inject_proof_table_css()
+    st.markdown(html_table, unsafe_allow_html=True)
 
-    st.markdown(
-        html_table,
-        unsafe_allow_html=True,
-    )
-
+    # ============================================================
+    # 実行サマリ（テンプレと同じ“顔”）
+    # ============================================================
     render_run_summary_compact(
         projects_root=PROJECTS_ROOT,
         run_id=st.session_state.get(K_LAST_RUN_ID),
@@ -837,29 +749,15 @@ if st.session_state.get(K_LAST_PLAN_MD):
     )
 
 
-# ============================================================
-# ダウンロード / Inbox保存
-# - session_state を正本にする
-# - download_button / Inbox保存後のrerunでも残る
-# ============================================================
-if st.session_state.get(K_LAST_PLAN_MD):
-
+    # ============================================================
+    # ダウンロード / Inbox保存
+    # ============================================================
     st.divider()
     st.markdown("### ③ 校正方針をダウンロード")
 
-    file_base = (
-        str(st.session_state.get(K_LAST_USED_FILE_NAME) or "pasted_text")
-    ).rsplit(".", 1)[0]
-
-    mode_label = str(
-        st.session_state.get(K_LAST_MODE) or ""
-    ).replace(" ", "")
-
-    file_stub = (
-        f"校正結果_{file_base}_[{mode_label}]"
-        if mode_label
-        else f"校正結果_{file_base}"
-    )
+    file_base = (used_file_name or "pasted_text").rsplit(".", 1)[0]
+    mode_label = mode.replace(" ", "")
+    file_stub = f"校正結果_{file_base}_[{mode_label}]" if mode_label else f"校正結果_{file_base}"
 
     in_t = st.session_state.get(K_LAST_IN_TOK)
     out_t = st.session_state.get(K_LAST_OUT_TOK)
@@ -879,47 +777,52 @@ if st.session_state.get(K_LAST_PLAN_MD):
     def _format_cost_lines_stub(*args: Any, **kwargs: Any) -> list[str]:
         return ["概算: —（このレポートでは推計しません）"]
 
-    if not st.session_state.get(K_LAST_PDF_BYTES):
-        pdf_bytes = build_policy_pdf_bytes_core(
-            original_numbered_preview=str(st.session_state.get(K_LAST_NUMBERED_PREVIEW) or ""),
-            plan_md=str(st.session_state.get(K_LAST_PLAN_MD) or ""),
-            model=str(st.session_state.get(K_LAST_CHOSEN_MODEL) or ""),
-            mode=str(st.session_state.get(K_LAST_MODE) or ""),
-            extra_prompt=str(st.session_state.get("extra_user_prompt") or ""),
-            src_name=str(st.session_state.get(K_LAST_USED_FILE_NAME) or "pasted_text.txt"),
-            usage_summary=usage_summary,
-            usd_jpy=usd_jpy,
-            format_cost_lines=_format_cost_lines_stub,
-        )
+    pdf_bytes = build_policy_pdf_bytes_core(
+        original_numbered_preview=numbered_preview,
+        plan_md=plan_md,
+        model=chosen_model,
+        mode=mode,
+        extra_prompt=extra_prompt,
+        src_name=used_file_name or "pasted_text.txt",
+        usage_summary=usage_summary,
+        usd_jpy=usd_jpy,
+        format_cost_lines=_format_cost_lines_stub,
+    )
 
-        st.session_state[K_LAST_PDF_BYTES] = pdf_bytes
-        st.session_state[K_LAST_PDF_NAME] = f"{file_stub}.pdf"
+    data_docx, ext = build_policy_docx_bytes_core(
+        original_numbered_preview=numbered_preview,
+        plan_md=plan_md,
+        model=chosen_model,
+        mode=mode,
+        extra_prompt=extra_prompt,
+        src_name=used_file_name or "pasted_text.txt",
+        usage_summary=usage_summary,
+        usd_jpy=usd_jpy,
+        format_cost_lines=_format_cost_lines_stub,
+    )
 
-    if not st.session_state.get(K_LAST_DOCX_BYTES):
-        data_docx, ext = build_policy_docx_bytes_core(
-            original_numbered_preview=str(st.session_state.get(K_LAST_NUMBERED_PREVIEW) or ""),
-            plan_md=str(st.session_state.get(K_LAST_PLAN_MD) or ""),
-            model=str(st.session_state.get(K_LAST_CHOSEN_MODEL) or ""),
-            mode=str(st.session_state.get(K_LAST_MODE) or ""),
-            extra_prompt=str(st.session_state.get("extra_user_prompt") or ""),
-            src_name=str(st.session_state.get(K_LAST_USED_FILE_NAME) or "pasted_text.txt"),
-            usage_summary=usage_summary,
-            usd_jpy=usd_jpy,
-            format_cost_lines=_format_cost_lines_stub,
-        )
+    pdf_name = f"{file_stub}.pdf"
+    docx_name = f"{file_stub}{ext}"
 
-        st.session_state[K_LAST_DOCX_BYTES] = data_docx
-        st.session_state[K_LAST_DOCX_NAME] = f"{file_stub}{ext}"
+    # ------------------------------------------------------------
+    # 生成済みデータを session_state に保持
+    # - download_button / inbox保存ボタンを続けて押せるようにする
+    # ------------------------------------------------------------
+    st.session_state[K_LAST_PDF_BYTES] = pdf_bytes
+    st.session_state[K_LAST_DOCX_BYTES] = data_docx
+    st.session_state[K_LAST_PDF_NAME] = pdf_name
+    st.session_state[K_LAST_DOCX_NAME] = docx_name
+    st.session_state[K_LAST_REPORT_ORIGIN] = {
+        "app": APP_NAME,
+        "page": PAGE_NAME,
+        "source_filename": used_file_name,
+        "mode": mode,
+        "model": chosen_model,
+    }
 
-    if not st.session_state.get(K_LAST_REPORT_ORIGIN):
-        st.session_state[K_LAST_REPORT_ORIGIN] = {
-            "app": APP_NAME,
-            "page": PAGE_NAME,
-            "source_filename": str(st.session_state.get(K_LAST_USED_FILE_NAME) or ""),
-            "mode": str(st.session_state.get(K_LAST_MODE) or ""),
-            "model": str(st.session_state.get(K_LAST_CHOSEN_MODEL) or ""),
-        }
-
+    # ------------------------------------------------------------
+    # 4ボタン横並び
+    # ------------------------------------------------------------
     col_pdf_dl, col_word_dl, col_pdf_inbox, col_word_inbox = st.columns(4)
 
     with col_pdf_dl:
@@ -929,24 +832,21 @@ if st.session_state.get(K_LAST_PLAN_MD):
                 data=st.session_state[K_LAST_PDF_BYTES],
                 file_name=st.session_state[K_LAST_PDF_NAME],
                 mime="application/pdf",
-                key=f"{PAGE_NAME}__dl_pdf",
+                key=f"{PAGE_NAME}__dl_pdf_{file_stub}",
                 on_click="ignore",
             )
         else:
             st.warning("PDFを生成できませんでした。")
 
     with col_word_dl:
-        if st.session_state.get(K_LAST_DOCX_BYTES):
-            st.download_button(
-                "Wordとして保存",
-                data=st.session_state[K_LAST_DOCX_BYTES],
-                file_name=st.session_state[K_LAST_DOCX_NAME],
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key=f"{PAGE_NAME}__dl_word",
-                on_click="ignore",
-            )
-        else:
-            st.warning("Wordを生成できませんでした。")
+        st.download_button(
+            "Wordとして保存",
+            data=st.session_state[K_LAST_DOCX_BYTES],
+            file_name=st.session_state[K_LAST_DOCX_NAME],
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key=f"{PAGE_NAME}__dl_word_{file_stub}",
+            on_click="ignore",
+        )
 
     with col_pdf_inbox:
         if st.button(

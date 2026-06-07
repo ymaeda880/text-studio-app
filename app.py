@@ -65,7 +65,7 @@ pg = st.navigation(
             ),
         ],
 
-        f"{NAV_PROCESS_ICON} 文章・Word校正": [
+        f"{NAV_PROCESS_ICON} 文章校閲": [
             st.Page("pages/03_文章校正.py", title="文章校正", icon="📝", url_path="03_文章校正"),
             st.Page("pages/04_word解析.py", title="Word解析", icon="📄", url_path="04_word解析"),
             st.Page("pages/08_目次チェック.py", title="目次チェック", icon="📑", url_path="08_目次チェック"),
@@ -87,6 +87,11 @@ pg = st.navigation(
 
         f"{NAV_CONSTRUCTION_ICON} （サンプル）AI文章作成": [
             st.Page("pages/24_AI文章作成.py", title="AI文章作成", icon="✍️", url_path="24_AI文章作成"),
+            st.Page(
+                "pages/21_AI翻訳.py",
+                title="AI翻訳",
+                icon="🌐",
+            ),
         ],
 
         f"{NAV_CONSTRUCTION_ICON} （サンプル）図表・チャート": [
