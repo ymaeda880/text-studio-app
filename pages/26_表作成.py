@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# pages/26_表作成.py
+# text_studio_app/pages/26_表作成.py
 #
 # Excel貼り付け → スタイル選択 → Word .docx 生成
 # ・画面プレビュー表示（rowspan/colspan 対応）
