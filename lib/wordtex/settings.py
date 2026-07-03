@@ -149,6 +149,71 @@ class FigureNumberSettings:
 
 
 # ============================================================
+# 表番号設定
+# ============================================================
+@dataclass
+class TableNumberSettings:
+    """
+    表番号の状態を保持する。
+
+    例:
+    - table_numbers=1, table_format="{1}" → 表1
+    """
+
+    caption: str = "表"
+    caption_sep: str = "："
+    numbers: int = 1
+    number_format: str = "{1}"
+    caption_position: str = "top"
+
+    def format_number_core(self) -> str:
+        """
+        接頭辞なしの表番号だけを返す。
+        """
+        return self.number_format.replace(
+            "{1}",
+            str(self.numbers),
+        )
+
+    def format_number(self) -> str:
+        """
+        接頭辞つきの表番号文字列を作成する。
+        """
+        return f"{self.caption}{self.format_number_core()}"
+
+    def format_caption(self, caption_text: str) -> str:
+        """
+        表番号と表題を結合する。
+        """
+        table_no = self.format_number()
+
+        caption_text = str(caption_text or "").strip()
+        if not caption_text:
+            return table_no
+
+        return f"{table_no}{self.caption_sep}{caption_text}"
+
+    def increment(self) -> None:
+        """
+        表を1つ出力した後に，表番号を増やす。
+        """
+        self.numbers += 1
+
+    def set_number(self, value: object) -> None:
+        """
+        表番号を直接セットする。
+        """
+        try:
+            n = int(str(value or "").strip())
+        except Exception:
+            n = 1
+
+        if n < 1:
+            n = 1
+
+        self.numbers = n
+
+# ============================================================
 # wordTex全体の設定状態
 # ============================================================
 @dataclass
@@ -161,6 +226,7 @@ class WordTexSettings:
     """
 
     figure: FigureNumberSettings = field(default_factory=FigureNumberSettings)
+    table: TableNumberSettings = field(default_factory=TableNumberSettings)
 
     # ------------------------------------------------------------
     # section番号
@@ -178,6 +244,33 @@ class WordTexSettings:
     section_title_format: str = "{num} {title}"
     subsection_title_format: str = "{num} {title}"
     subsubsection_title_format: str = "{num} {title}"
+
+    # ------------------------------------------------------------
+    # フォント設定
+    # ------------------------------------------------------------
+    font: str = "report"
+    size: float = 11.0
+
+    # ------------------------------------------------------------
+    # table Excel 読み込み用パス
+    # ------------------------------------------------------------
+    table_path: str = ""
+
+    # ------------------------------------------------------------
+    # table セル内画像読み込み用パス
+    #
+    # Excelセルに
+    #   <図1.png,width=2.5cm,align=center>
+    # のように書いた場合，このパスから画像を読む。
+    # ------------------------------------------------------------
+    table_fig_path: str = ""
+
+    # ------------------------------------------------------------
+    # figure / figureTable 画像読み込み用パス
+    # ------------------------------------------------------------
+    fig_path: str = ""
+    fig_table_path: str = ""
+
 
     labels: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -349,6 +442,12 @@ def apply_wordtex_setting(
     - fig_increment_level
     - fig_reset_lower
     - fig_caption_position
+    表番号設定:
+    - table_caption
+    - table_caption_sep
+    - table_numbers
+    - table_format
+    - table_caption_position
     """
     key_text = str(key or "").strip()
     value_text = str(value or "").strip()
@@ -357,6 +456,7 @@ def apply_wordtex_setting(
         return
 
     fig = settings.figure
+    table = settings.table
 
     if key_text == "fig_caption":
         fig.caption = value_text or "図"
@@ -412,6 +512,73 @@ def apply_wordtex_setting(
         settings.subsubsection_title_format = (
             value_text or "{num} {title}"
         )
+        return
+    
+    # ------------------------------------------------------------
+    # 表番号設定
+    # ------------------------------------------------------------
+    if key_text == "table_caption":
+        table.caption = value_text or "表"
+        return
+
+    if key_text == "table_caption_sep":
+        table.caption_sep = value_text
+        return
+
+    if key_text == "table_numbers":
+        table.set_number(value_text)
+        return
+
+    if key_text == "table_format":
+        table.number_format = value_text or "{1}"
+        return
+
+    if key_text == "table_caption_position":
+        if value_text in {"top", "bottom"}:
+            table.caption_position = value_text
+        else:
+            settings.add_warning(
+                f"table_caption_position が不正です: {value_text}"
+            )
+        return
+    
+    # ------------------------------------------------------------
+    # table Excel 読み込み用パス
+    # ------------------------------------------------------------
+    if key_text == "table_path":
+        settings.table_path = value_text
+        return
+
+    if key_text == "table_fig_path":
+        settings.table_fig_path = value_text
+        return
+
+    if key_text == "fig_path":
+        settings.fig_path = value_text
+        return
+
+    if key_text == "fig_table_path":
+        settings.fig_table_path = value_text
+        return
+
+
+    # ------------------------------------------------------------
+    # フォント
+    # ------------------------------------------------------------
+    if key_text == "font":
+        settings.font = value_text or "report"
+        return
+
+    # ------------------------------------------------------------
+    # 本文サイズ
+    # ------------------------------------------------------------
+    if key_text == "size":
+        try:
+            settings.size = float(value_text)
+        except Exception:
+            settings.add_warning(
+                f"size が不正です: {value_text}"
+            )
         return
 
     settings.add_warning(

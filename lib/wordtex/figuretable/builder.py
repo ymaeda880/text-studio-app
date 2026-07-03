@@ -119,17 +119,25 @@ def set_image_cell_content(
     cell,
     inbox_root: Path,
     sub: str,
+    settings: WordTexSettings,
     item: FigureTableItem,
     image_width_cm: float,
 ) -> None:
     p = cell.paragraphs[0]
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    image_path = resolve_inbox_image_path_by_filename(
-        inbox_root=inbox_root,
-        sub=sub,
-        file_name=item.file,
-    )
+    fig_table_path = str(
+        getattr(settings, "fig_table_path", "") or ""
+    ).strip()
+
+    if not fig_table_path or fig_table_path.lower() == "inbox":
+        image_path = resolve_inbox_image_path_by_filename(
+            inbox_root=inbox_root,
+            sub=sub,
+            file_name=item.file,
+        )
+    else:
+        image_path = Path(fig_table_path) / str(item.file)
 
     if image_path is None or not image_path.exists():
         p.add_run(f"画像が見つかりません: {item.file}")
@@ -456,6 +464,7 @@ def add_figure_table_body(
     doc: DocumentObject,
     inbox_root: Path,
     sub: str,
+    settings: WordTexSettings,
     block: FigureTableBlock,
 ) -> None:
     columns = int(block.row or 2)
@@ -550,6 +559,7 @@ def add_figure_table_body(
                     cell=cell,
                     inbox_root=inbox_root,
                     sub=sub,
+                    settings=settings,
                     item=item_row[col_idx],
                     image_width_cm=image_widths_cm[col_idx],
                 )
@@ -605,6 +615,7 @@ def add_figure_table_block(
         doc=doc,
         inbox_root=inbox_root,
         sub=sub,
+        settings=settings,
         block=block,
     )
 

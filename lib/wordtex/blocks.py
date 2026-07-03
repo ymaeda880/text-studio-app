@@ -76,11 +76,9 @@ class ParagraphHeadingBlock:
 
 @dataclass
 class SetBlock:
-    key: str
-    value: str
+    values: dict[str, str] = field(default_factory=dict)
     raw: str = ""
     kind: BlockKind = "set"
-
 
 @dataclass
 class FigureTableItem:
@@ -174,6 +172,59 @@ class TableBlock:
     style: str = "simple"
     header_rows: int = 1
     header_cols: int = 0
+
+    # ------------------------------------------------------------
+    # Excel読み込み指定
+    #
+    # 例:
+    #   \begin{table,caption="全景",src=["2019003.xlsx","sheet1"]}
+    # ------------------------------------------------------------
+    src_file: str = ""
+    src_sheet: str = ""
+
+    # ------------------------------------------------------------
+    # 表全体の幅
+    # 例:
+    #   width="100%"   → 通常幅
+    #   width="120%"   → 通常幅の1.2倍
+    #   width="18cm"   → 18cm
+    # ------------------------------------------------------------
+    width: str = "100%"
+
+    # ------------------------------------------------------------
+    # 列幅比率
+    # 例:
+    #   col_ratio=[1,2,1]
+    #   col_ratio=[100,200]
+    # ------------------------------------------------------------
+    col_ratio: list[float] = field(default_factory=list)
+
+    # ------------------------------------------------------------
+    # 列幅cm指定
+    # 例:
+    #   col_widths=[4,8,4]
+    # ------------------------------------------------------------
+    col_widths: list[float] = field(default_factory=list)
+
+    # ------------------------------------------------------------
+    # 表のコンパクト表示
+    #
+    # none        : 既定
+    # normal      : 少し詰める
+    # tight       : かなり詰める
+    # verytight   : 最大限詰める
+    # ------------------------------------------------------------
+    compact: str = "none"
+
+    # ------------------------------------------------------------
+    # 表内文字サイズ
+    #
+    # normal    : 既定
+    # small     : 少し小さい
+    # verysmall : さらに小さい
+    # ------------------------------------------------------------
+    fontsize: str = "normal"
+
     rows: list[list[str]] = field(default_factory=list)
     note: str = ""
     raw: str = ""

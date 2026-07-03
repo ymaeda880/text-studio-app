@@ -123,6 +123,116 @@ def _set_cell_border(cell, **kwargs):
             tag.set(qn("w:color"), color)
             tcBorders.append(tag)
 
+_BORDER_OVERRIDE_RE = re.compile(
+    r"\s*[<＜]\s*border\s*:\s*(?P<body>[^<>＜＞]+)\s*[>＞]\s*"
+)
+
+_BORDER_EDGES = {"top", "bottom", "left", "right"}
+
+
+def _parse_cell_border_overrides(value) -> dict[str, str]:
+    """
+    セル内の <border:top=none,bottom=none> を解析する。
+    """
+    text = str(value or "")
+    result: dict[str, str] = {}
+
+    for m in _BORDER_OVERRIDE_RE.finditer(text):
+        body = str(m.group("body") or "").strip()
+
+        for part in body.split(","):
+            if "=" not in part:
+                continue
+
+            key, val = part.split("=", 1)
+            key = key.strip().lower()
+            val = val.strip().lower()
+
+            if key in _BORDER_EDGES and val in {"none", "nil"}:
+                result[key] = "nil"
+
+    return result
+
+
+def _strip_cell_border_overrides(value) -> str:
+    """
+    表示文字列から <border:...> を削除する。
+    """
+    text = str(value or "")
+    return _BORDER_OVERRIDE_RE.sub("", text).strip()
+
+
+def _set_cell_border_nil(cell, edge: str) -> None:
+    """
+    指定辺の罫線を消す。
+    既存の同じ辺の指定を削除してから nil を入れる。
+    """
+    if edge not in _BORDER_EDGES:
+        return
+
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcBorders = tcPr.find(qn("w:tcBorders"))
+
+    if tcBorders is None:
+        tcBorders = OxmlElement("w:tcBorders")
+        tcPr.append(tcBorders)
+
+    for old in list(tcBorders.findall(qn(f"w:{edge}"))):
+        tcBorders.remove(old)
+
+    tag = OxmlElement(f"w:{edge}")
+    tag.set(qn("w:val"), "nil")
+    tag.set(qn("w:sz"), "0")
+    tag.set(qn("w:color"), "auto")
+    tcBorders.append(tag)
+
+
+def _apply_table_cell_border_overrides(table, rows) -> None:
+    """
+    セルごとの罫線指定を反映する。
+
+    例:
+        値 <border:top=none,bottom=none>
+
+    注意:
+        top を消す場合は，直上セルの bottom も消す。
+        bottom を消す場合は，直下セルの top も消す。
+        left/right も同様に隣接セル側を消す。
+    """
+    if not rows:
+        return
+
+    R = len(rows)
+    C = len(rows[0]) if rows[0] else 0
+
+    for r in range(R):
+        for c in range(C):
+            overrides = _parse_cell_border_overrides(rows[r][c])
+
+            if not overrides:
+                continue
+
+            cell = table.cell(r, c)
+
+            if "top" in overrides:
+                _set_cell_border_nil(cell, "top")
+                if r > 0:
+                    _set_cell_border_nil(table.cell(r - 1, c), "bottom")
+
+            if "bottom" in overrides:
+                _set_cell_border_nil(cell, "bottom")
+                if r < R - 1:
+                    _set_cell_border_nil(table.cell(r + 1, c), "top")
+
+            if "left" in overrides:
+                _set_cell_border_nil(cell, "left")
+                if c > 0:
+                    _set_cell_border_nil(table.cell(r, c - 1), "right")
+
+            if "right" in overrides:
+                _set_cell_border_nil(cell, "right")
+                if c < C - 1:
+                    _set_cell_border_nil(table.cell(r, c + 1), "left")
 
 # =========================================================
 # 列幅関連
@@ -352,6 +462,7 @@ def _merge_docx_by_spans(
 
             cell = table.cell(r, c)
             raw = str(rows[r][c])
+            raw = _strip_cell_border_overrides(raw)
 
             raw = raw.replace("\r\n", "\n").replace("\r", "\n")
             parts_raw = _BREAK_RE.split(raw)
@@ -408,6 +519,7 @@ def _apply_table_borders_robust(
     table,
     spans,
     *,
+    rows=None,
     inner_h: bool = True,
     inner_v: bool = True,
     outer: bool = True,
@@ -529,6 +641,11 @@ def _apply_table_borders_robust(
                         cell = table.cell(r, c)
                         _set_cell_border(cell, right=("single", sz_outer, color))
                         break
+
+    # --- セルごとの罫線上書き ---
+    if rows is not None:
+        _apply_table_cell_border_overrides(table, rows)
+
 
 # =========================================================
 # HTML プレビュー生成（ヘッダー行 + ヘッダー列）

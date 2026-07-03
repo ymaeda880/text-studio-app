@@ -101,7 +101,7 @@ pg = st.navigation(
             st.Page("pages/33_フローチャート.py", title="フローチャート", icon="🔀", url_path="33_フローチャート"),
         ],
 
-        f"{NAV_CONSTRUCTION_ICON} Word書類作成支援": [
+        f"{NAV_CONSTRUCTION_ICON} （開発中）Word書類作成支援": [
             st.Page(
                 "pages/110_word画像埋込.py",
                 title="Word画像埋込",

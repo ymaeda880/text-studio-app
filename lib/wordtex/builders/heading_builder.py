@@ -13,8 +13,10 @@ from __future__ import annotations
 # imports
 # ============================================================
 from docx.document import Document as DocumentObject
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
+from docx.oxml.ns import qn
 
+from lib.wordtex.font.presets import get_font_preset
 from lib.wordtex.blocks import HeadingBlock
 from lib.wordtex.settings import WordTexSettings
 
@@ -72,6 +74,20 @@ def add_heading_block(
         heading_text,
         level=int(block.level),
     )
+
+    # ------------------------------------------------------------
+    # 見出し文字色
+    # - Word標準では Heading スタイルが青色になるため，
+    #   wordTexでは黒へ統一する。
+    # ------------------------------------------------------------
+    for run in p.runs:
+        run.font.color.rgb = RGBColor(0, 0, 0)
+
+        preset = get_font_preset(settings.font)
+        heading_font = preset.heading
+
+        run.font.name = heading_font
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), heading_font)
 
     # ------------------------------------------------------------
     # 見出しの段落間隔

@@ -11,6 +11,10 @@ from lib.table.presets import PRESETS
 
 TABLE_STYLE_MAP: dict[str, str] = {
     "simple": "シンプル（罫線あり・見出し白）",
+    "zebra": "ゼブラ（横＋縦罫・見出し濃色）",
+    "horizontal": "横罫のみ（モノトーン）",
+    "box": "ボックス＋見出し色",
+    "dark": "濃色ヘッダー",
 }
 
 

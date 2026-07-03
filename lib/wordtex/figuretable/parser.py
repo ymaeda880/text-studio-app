@@ -79,6 +79,7 @@ def split_attrs(attr_text: str) -> list[str]:
     buf: list[str] = []
     quote: str | None = None
     escape = False
+    bracket_depth = 0
 
     for ch in text:
         if escape:
@@ -102,7 +103,23 @@ def split_attrs(attr_text: str) -> list[str]:
             quote = ch
             continue
 
-        if ch == ",":
+        # ------------------------------------------------------------
+        # リスト指定 [1,2,3] の中では，カンマを属性区切りにしない。
+        # 例:
+        #   col_ratio=[1,2,1]
+        # ------------------------------------------------------------
+        if ch == "[":
+            bracket_depth += 1
+            buf.append(ch)
+            continue
+
+        if ch == "]":
+            if bracket_depth > 0:
+                bracket_depth -= 1
+            buf.append(ch)
+            continue
+
+        if ch == "," and bracket_depth == 0:
             part = "".join(buf).strip()
             if part:
                 parts.append(part)

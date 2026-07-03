@@ -17,9 +17,11 @@ import re
 
 from docx.document import Document as DocumentObject
 from docx.shared import Pt, RGBColor
+from docx.oxml.ns import qn
 
 from lib.wordtex.blocks import ParagraphBlock
 from lib.wordtex.settings import WordTexSettings
+from lib.wordtex.font.presets import get_font_preset
 
 from lib.wordtex.colors import COLOR_MAP
 
@@ -237,17 +239,30 @@ def add_inline_runs(
     *,
     paragraph,
     text: str,
+    settings: WordTexSettings,
 ) -> None:
     """
     段落へインライン装飾つき run を追加する。
     """
+    preset = get_font_preset(settings.font)
+    body_font = preset.body
+
     for inline_run in parse_inline_runs(text):
         run = paragraph.add_run(inline_run.text)
+
+        # --------------------------------------------------------
+        # 本文フォント
+        # - ascii / hAnsi と eastAsia の両方を指定する
+        # - 日本語フォントが環境依存で変わるのを防ぐ
+        # --------------------------------------------------------
+        run.font.name = body_font
+        run.font.size = Pt(settings.size)
+        run._element.rPr.rFonts.set(qn("w:eastAsia"), body_font)
+
         apply_inline_style(
             run=run,
             style=inline_run.style,
         )
-
 
 # ============================================================
 # 段落出力
@@ -322,4 +337,5 @@ def add_paragraph_block(
             add_inline_runs(
                 paragraph=p,
                 text=line,
+                settings=settings,
             )

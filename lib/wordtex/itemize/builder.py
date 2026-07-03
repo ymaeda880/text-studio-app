@@ -158,6 +158,7 @@ def add_itemize_item_paragraph(
         add_inline_runs(
             paragraph=p,
             text=text,
+            settings=settings,
         )
         return
 
@@ -168,6 +169,7 @@ def add_itemize_item_paragraph(
     add_inline_runs(
         paragraph=p,
         text=text,
+        settings=settings,
     )
 
 

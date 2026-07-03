@@ -154,22 +154,36 @@ def parse_set_line(
 
     body = str(m.group("body") or "").strip()
 
-    if "=" not in body:
+    if not body:
+        warnings.append(f"set設定が空です: {line}")
+        return None, warnings
+
+    # ------------------------------------------------------------
+    # \set{font="report",size=11} のような
+    # カンマ区切り key=value を読む。
+    #
+    # parse_attrs は section / figureTable などでも使っている
+    # 既存の属性解析処理なので、ここでも流用する。
+    # ------------------------------------------------------------
+    values = parse_attrs(body)
+
+    cleaned_values: dict[str, str] = {}
+
+    for key, value in values.items():
+        key_text = str(key or "").strip()
+        value_text = strip_outer_quotes(str(value or "").strip())
+
+        if not key_text:
+            continue
+
+        cleaned_values[key_text] = value_text
+
+    if not cleaned_values:
         warnings.append(f"set設定が不正です: {line}")
         return None, warnings
 
-    key, value = body.split("=", 1)
-
-    key = key.strip()
-    value = strip_outer_quotes(value.strip())
-
-    if not key:
-        warnings.append(f"set設定のキーが空です: {line}")
-        return None, warnings
-
     return SetBlock(
-        key=key,
-        value=value,
+        values=cleaned_values,
         raw=str(line or ""),
     ), warnings
 

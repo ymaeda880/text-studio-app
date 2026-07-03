@@ -18,7 +18,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
 from docx.enum.section import WD_SECTION
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -61,11 +61,12 @@ def apply_set_block(
     """
     SetBlock を WordTexSettings に反映する。
     """
-    apply_wordtex_setting(
-        settings=settings,
-        key=block.key,
-        value=block.value,
-    )
+    for key, value in block.values.items():
+        apply_wordtex_setting(
+            settings=settings,
+            key=key,
+            value=value,
+        )
 
 # ============================================================
 # タイトルページ
@@ -178,7 +179,18 @@ def add_table_of_contents(
     注意:
     Wordで開いた後に「目次の更新」が必要。
     """
-    doc.add_heading("目次", level=1)
+    heading = doc.add_heading(
+        "目次",
+        level=1,
+    )
+
+    # ------------------------------------------------------------
+    # 目次見出し文字色
+    # - Word標準の Heading スタイルでは青色になるため，
+    #   wordTexでは黒へ統一する。
+    # ------------------------------------------------------------
+    for run in heading.runs:
+        run.font.color.rgb = RGBColor(0, 0, 0)
 
     p = doc.add_paragraph()
 
@@ -521,9 +533,10 @@ def build_wordtex_docx_bytes(
                 doc,
                 block,
                 settings,
+                inbox_root=Path(inbox_root),
+                sub=str(sub),
             )
             continue
-
 
         # --------------------------------------------------------
         # 改ページ
