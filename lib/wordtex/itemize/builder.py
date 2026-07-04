@@ -153,7 +153,12 @@ def add_itemize_item_paragraph(
     text = settings.resolve_refs(str(item.text or "").strip())
 
     if label:
-        p.add_run(label)
+        # ------------------------------------------------------------
+        # \item[ラベル] のラベル部分は太字で出力する。
+        # ------------------------------------------------------------
+        label_run = p.add_run(label)
+        label_run.bold = True
+
         p.add_run("　")
         add_inline_runs(
             paragraph=p,

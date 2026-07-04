@@ -266,6 +266,7 @@ def build_table_block(
         col_widths=col_widths,
         compact=str(attrs.get("compact") or "none").strip().lower(),
         fontsize=str(attrs.get("fontsize") or "normal").strip().lower(),
+        border=_to_bool(attrs.get("border"), True),
         rows=rows,
         note="\n".join(note_lines).strip(),
         raw=raw,

@@ -32,6 +32,7 @@ from lib.wordtex.blocks import (
     FigureTableBlock,
     FigureBlock,
     NewPageBlock,
+    VSkipBlock,
     TitleBlock,
     AuthorBlock,
     DateBlock,
@@ -49,6 +50,7 @@ from lib.wordtex.figuretable.builder import add_figure_table_block
 from lib.wordtex.figure.builder import add_figure_block
 from lib.wordtex.itemize.builder import add_itemize_block
 from lib.wordtex.table.builder import add_table_block
+from lib.wordtex.builders.vskip_builder import add_vskip_block
 
 # ============================================================
 # setブロック反映
@@ -535,6 +537,25 @@ def build_wordtex_docx_bytes(
                 settings,
                 inbox_root=Path(inbox_root),
                 sub=str(sub),
+            )
+            continue
+
+        # --------------------------------------------------------
+        # 縦方向スペース
+        #
+        # wordTex の
+        #
+        #     \vskip{1line}
+        #     \vskip{0.5line}
+        #     \vskip{12pt}
+        #
+        # に対応する。
+        # --------------------------------------------------------
+        if isinstance(block, VSkipBlock):
+            add_vskip_block(
+                doc=doc,
+                settings=settings,
+                block=block,
             )
             continue
 

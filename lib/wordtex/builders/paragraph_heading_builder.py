@@ -30,7 +30,7 @@ def add_paragraph_heading_block(
     title = settings.resolve_refs(title)
 
     p = doc.add_paragraph()
-    p.paragraph_format.space_before = Pt(0)
+    p.paragraph_format.space_before = Pt(4)
     p.paragraph_format.space_after = Pt(0)
 
     run = p.add_run(title)

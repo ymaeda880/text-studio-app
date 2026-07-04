@@ -327,7 +327,15 @@ def add_paragraph_block(
             if p is None:
                 p = doc.add_paragraph()
 
-                p.paragraph_format.first_line_indent = Pt(10.5)
+                # ------------------------------------------------
+                # \noindent 指定段落
+                # - 直前に \noindent がある段落だけ字下げしない
+                # ------------------------------------------------
+                if getattr(block, "noindent", False):
+                    p.paragraph_format.first_line_indent = Pt(0)
+                else:
+                    p.paragraph_format.first_line_indent = Pt(10.5)
+                    
                 p.paragraph_format.space_before = Pt(0)
                 p.paragraph_format.space_after = Pt(0)
 

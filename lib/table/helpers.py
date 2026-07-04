@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# lib/table/helpers.py
+# text_studio_app/lib/table/helpers.py
 #
 # Word表作成用のユーティリティ群
 # - テキスト→2次元配列パース
@@ -132,7 +132,12 @@ _BORDER_EDGES = {"top", "bottom", "left", "right"}
 
 def _parse_cell_border_overrides(value) -> dict[str, str]:
     """
-    セル内の <border:top=none,bottom=none> を解析する。
+    セル内の罫線指定を解析する。
+
+    対応:
+        <border:top=none>
+        <border:top=true>
+        <border:top=none,bottom=true>
     """
     text = str(value or "")
     result: dict[str, str] = {}
@@ -148,8 +153,14 @@ def _parse_cell_border_overrides(value) -> dict[str, str]:
             key = key.strip().lower()
             val = val.strip().lower()
 
-            if key in _BORDER_EDGES and val in {"none", "nil"}:
+            if key not in _BORDER_EDGES:
+                continue
+
+            if val in {"none", "nil", "false", "off", "0"}:
                 result[key] = "nil"
+
+            elif val in {"true", "on", "1", "single"}:
+                result[key] = "single"
 
     return result
 
@@ -187,17 +198,46 @@ def _set_cell_border_nil(cell, edge: str) -> None:
     tcBorders.append(tag)
 
 
+def _set_cell_border_single(
+    cell,
+    edge: str,
+    *,
+    sz: int = 6,
+    color: str = "000000",
+) -> None:
+    """
+    指定辺の罫線を描く。
+    既存の同じ辺の指定を削除してから single を入れる。
+    """
+    if edge not in _BORDER_EDGES:
+        return
+
+    tcPr = cell._tc.get_or_add_tcPr()
+    tcBorders = tcPr.find(qn("w:tcBorders"))
+
+    if tcBorders is None:
+        tcBorders = OxmlElement("w:tcBorders")
+        tcPr.append(tcBorders)
+
+    for old in list(tcBorders.findall(qn(f"w:{edge}"))):
+        tcBorders.remove(old)
+
+    tag = OxmlElement(f"w:{edge}")
+    tag.set(qn("w:val"), "single")
+    tag.set(qn("w:sz"), str(sz))
+    tag.set(qn("w:color"), color)
+    tcBorders.append(tag)
+
 def _apply_table_cell_border_overrides(table, rows) -> None:
     """
     セルごとの罫線指定を反映する。
 
-    例:
-        値 <border:top=none,bottom=none>
+    none / false:
+        指定辺を消す。隣接セル側も消す。
 
-    注意:
-        top を消す場合は，直上セルの bottom も消す。
-        bottom を消す場合は，直下セルの top も消す。
-        left/right も同様に隣接セル側を消す。
+    true:
+        指定辺を描く。隣接セル側も描く。
+        border=false の表でも，セル指定を優先する。
     """
     if not rows:
         return
@@ -214,25 +254,31 @@ def _apply_table_cell_border_overrides(table, rows) -> None:
 
             cell = table.cell(r, c)
 
-            if "top" in overrides:
-                _set_cell_border_nil(cell, "top")
-                if r > 0:
-                    _set_cell_border_nil(table.cell(r - 1, c), "bottom")
+            for edge, mode in overrides.items():
+                if mode == "single":
+                    setter = _set_cell_border_single
+                else:
+                    setter = _set_cell_border_nil
 
-            if "bottom" in overrides:
-                _set_cell_border_nil(cell, "bottom")
-                if r < R - 1:
-                    _set_cell_border_nil(table.cell(r + 1, c), "top")
+                if edge == "top":
+                    setter(cell, "top")
+                    if r > 0:
+                        setter(table.cell(r - 1, c), "bottom")
 
-            if "left" in overrides:
-                _set_cell_border_nil(cell, "left")
-                if c > 0:
-                    _set_cell_border_nil(table.cell(r, c - 1), "right")
+                elif edge == "bottom":
+                    setter(cell, "bottom")
+                    if r < R - 1:
+                        setter(table.cell(r + 1, c), "top")
 
-            if "right" in overrides:
-                _set_cell_border_nil(cell, "right")
-                if c < C - 1:
-                    _set_cell_border_nil(table.cell(r, c + 1), "left")
+                elif edge == "left":
+                    setter(cell, "left")
+                    if c > 0:
+                        setter(table.cell(r, c - 1), "right")
+
+                elif edge == "right":
+                    setter(cell, "right")
+                    if c < C - 1:
+                        setter(table.cell(r, c + 1), "left")
 
 # =========================================================
 # 列幅関連

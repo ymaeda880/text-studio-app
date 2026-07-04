@@ -1016,13 +1016,15 @@ def add_table_block(
         ),
     )
 
+    table_border = bool(getattr(block, "border", True))
+
     apply_table_borders_robust(
         table,
         spans,
         rows=rows,
-        inner_h=inner_h,
-        inner_v=inner_v,
-        outer=outer,
+        inner_h=inner_h if table_border else False,
+        inner_v=inner_v if table_border else False,
+        outer=outer if table_border else False,
         outer_mode=outer_mode,
         sz_inner=6,
         sz_outer=12,

@@ -15,6 +15,7 @@ BlockKind = Literal[
     "figure_table",
     "figure",
     "newpage",
+    "vskip",
     "title",
     "author",
     "date",
@@ -52,8 +53,8 @@ class TableOfContentsBlock:
 @dataclass
 class ParagraphBlock:
     text: str
+    noindent: bool = False
     kind: BlockKind = "paragraph"
-
 
 @dataclass
 class HeadingBlock:
@@ -165,6 +166,25 @@ class NewPageBlock:
 
 
 @dataclass
+class VSkipBlock:
+    """
+    縦方向の空きを入れるブロック。
+
+    例:
+        \vskip{1line}
+        \vskip{0.5line}
+        \vskip{2line}
+        \vskip{12pt}
+        \vskip{5mm}
+        \vskip{1cm}
+    """
+
+    amount: str = ""
+    raw: str = ""
+    kind: BlockKind = "vskip"
+
+
+@dataclass
 class TableBlock:
     title: str = ""
     caption: str = ""
@@ -225,6 +245,17 @@ class TableBlock:
     # ------------------------------------------------------------
     fontsize: str = "normal"
 
+    # ------------------------------------------------------------
+    # 表罫線
+    #
+    # true  : 通常どおり罫線を描く
+    # false : 表全体の罫線を描かない
+    #         ただしセル側の <border:top=true> などは優先する
+    # ------------------------------------------------------------
+    border: bool = True
+
+
+
     rows: list[list[str]] = field(default_factory=list)
     note: str = ""
     raw: str = ""
@@ -240,6 +271,7 @@ class ParsedWordTex:
         | FigureTableBlock
         | FigureBlock
         | NewPageBlock
+        | VSkipBlock
         | TitleBlock
         | AuthorBlock
         | DateBlock
