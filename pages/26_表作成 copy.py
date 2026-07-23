@@ -81,6 +81,7 @@ from lib.explanations.exp_table_maker import (
 from lib.table.helpers import (
     _parse_table as parse_table,
     _compute_col_widths_cm as compute_col_widths_cm,
+    _widths_to_pct as widths_to_pct,
     _compute_spans_markers as compute_spans_markers,
     _merge_docx_by_spans as merge_docx_by_spans,
     _apply_docx_col_widths as apply_docx_col_widths,
@@ -177,23 +178,7 @@ with c4:
     )
 
 
-# ============================================================
-# 表全体の幅
-# - Word・HTMLプレビュー共通の表全体幅(cm)
-# - 均等・自動・手動すべてこの値を基準にする
-# ============================================================
-st.markdown("**④ 表全体の幅**")
-
-TOTAL_CM = st.number_input(
-    "表全体の幅(cm)",
-    min_value=5.0,
-    max_value=40.0,
-    value=16.0,
-    step=0.5,
-    help="Wordおよび画面プレビューで使用する表全体の幅です。",
-)
-
-st.markdown("**⑤ スタイル（プリセット → 詳細調整可）**")
+st.markdown("**④ スタイル（プリセット → 詳細調整可）**")
 c1, c2 = st.columns([1.2, 1])
 with c1:
     preset = st.radio("プリセット", list(PRESETS.keys()), index=3)
@@ -258,7 +243,7 @@ col_width_mode = st.radio(
     index=0,
     horizontal=True,
 )
-
+TOTAL_CM = 16.0
 body_size = int(base_size)
 header_size = int(base_size if header_same else base_size + 1)
 
@@ -342,11 +327,9 @@ if make_btn:
         if (not st.session_state.manual_widths) or (
             len(st.session_state.manual_widths) != len(rows[0])
         ):
-            st.session_state.manual_widths = [
-                TOTAL_CM / len(rows[0])
-            ] * len(rows[0])
-
+            st.session_state.manual_widths = [TOTAL_CM / len(rows[0])] * len(rows[0])
         widths_cm = st.session_state.manual_widths[:]
+    widths_pct = widths_to_pct(widths_cm)
 
     # プレビュー用DF（「先頭行」をヘッダーにして、データは header_rows_int 行目以降）
     if len(rows) > 1:
@@ -455,7 +438,7 @@ if make_btn:
         outer=outer,
         outer_mode=outer_mode,   # ★ これが無いとプレビューは絶対に治りません
         note_text=note_text,
-        col_width_cm=widths_cm,
+        col_width_pct=widths_pct,
         row_header_cols=header_cols_int,  # ★ HTML側にも行ヘッダー列を反映
     )
     st.markdown(html, unsafe_allow_html=True)

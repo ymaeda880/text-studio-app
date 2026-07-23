@@ -6,4 +6,5 @@ port = 8507
 address = "0.0.0.0"
 baseUrlPath = "/text_studio"
 enableCORS = false
+enableXsrfProtection = false
 headless = true

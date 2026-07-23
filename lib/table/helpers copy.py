@@ -715,16 +715,7 @@ def _build_html_table_with_spans(
     outer: bool,
     outer_mode: str = "box",   # ★ 追加："box" / "top_bottom"
     note_text: Optional[str] = None,
-
-    # ------------------------------------------------------------
-    # 列幅指定
-    # - col_width_pct：既存ページ用の割合指定（後方互換のため維持）
-    # - col_width_cm ：Wordと同じcm単位で表示する場合に使用
-    # - 両方が指定された場合は col_width_cm を優先する
-    # ------------------------------------------------------------
     col_width_pct: Optional[List[float]] = None,
-    col_width_cm: Optional[List[float]] = None,
-
     row_header_cols: int = 0,   # 左から何列を「ヘッダー列」として扱うか（HTML側）
 ) -> str:
 
@@ -767,95 +758,16 @@ def _build_html_table_with_spans(
     th_weight = "font-weight:700;" if header_bold else "font-weight:400;"
     zebra_alt = "#F7F9FC"
 
-
-    # ------------------------------------------------------------
-    # HTMLテーブル幅
-    # - Wordと同じcm単位を使用する
-    # - 列幅の合計を100％へ正規化しない
-    # ------------------------------------------------------------
-    valid_widths_cm: List[float] = []
-
-    if col_width_cm and len(col_width_cm) == C:
-        for value in col_width_cm:
-            try:
-                width = float(value)
-            except (TypeError, ValueError):
-                width = 0.5
-
-            valid_widths_cm.append(max(0.5, width))
-
-    # ------------------------------------------------------------
-    # HTMLテーブル幅
-    # - col_width_cm が指定されている場合はWordと同じ実寸(cm)を使用する
-    # - それ以外は従来どおり100%表示とする
-    # ------------------------------------------------------------
-    if valid_widths_cm:
-        table_width_cm = sum(valid_widths_cm)
-        table_width_css = (
-            f"width:{table_width_cm:.2f}cm;"
-            "table-layout:fixed;"
-            "display:inline-table;"
-        )
-    else:
-        table_width_css = (
-            "width:100%;"
-            "table-layout:fixed;"
-        )
-
     # ------------------------------------------------------------
     # HTML table 開始
     # ------------------------------------------------------------
-    html: List[str] = [
-        (
-            f'<table style="'
-            f'{border_css}'
-            f'{outer_css}'
-            f'{table_width_css}'
-            f'">'
-        ),
-    ]
+    html: List[str] = [f'<table style="{border_css}{outer_css} width:100%;">']
 
-    # ============================================================
-    # colgroupによる列幅指定
-    #
-    # col_width_cmが指定されている場合：
-    # - Wordと同じcm単位で列幅を設定する
-    # - 今回の表作成ページではこちらを使用する
-    #
-    # col_width_cmが指定されていない場合：
-    # - 既存ページとの互換性を保つため，
-    #   従来のcol_width_pctによる割合指定を使用する
-    # ============================================================
-    if valid_widths_cm:
-        # --------------------------------------------------------
-        # cm単位の列幅を設定
-        # --------------------------------------------------------
+    # colgroup（列幅%指定）
+    if col_width_pct:
         html.append("<colgroup>")
-
-        for width_cm in valid_widths_cm:
-            html.append(
-                f'<col style="width:{width_cm:.2f}cm;">'
-            )
-
-        html.append("</colgroup>")
-
-    elif col_width_pct:
-        # --------------------------------------------------------
-        # 従来の割合指定を維持
-        # - helpers.pyを使用している他ページへの影響を防ぐ
-        # --------------------------------------------------------
-        html.append("<colgroup>")
-
-        for width_pct in col_width_pct:
-            try:
-                safe_width_pct = float(width_pct)
-            except (TypeError, ValueError):
-                safe_width_pct = 0.0
-
-            html.append(
-                f'<col style="width:{safe_width_pct:.2f}%;">'
-            )
-
+        for p in col_width_pct:
+            html.append(f'<col style="width:{p}%">')
         html.append("</colgroup>")
 
     hb = header_bg or "#EEEEEE"
