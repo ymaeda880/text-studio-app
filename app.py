@@ -99,6 +99,12 @@ pg = st.navigation(
             st.Page("pages/27_棒グラフ作成.py", title="棒グラフ作成", icon="📊", url_path="27_棒グラフ作成"),
             st.Page("pages/32_ガントチャート.py", title="ガントチャート", icon="📅", url_path="32_ガントチャート"),
             st.Page("pages/33_フローチャート.py", title="フローチャート", icon="🔀", url_path="33_フローチャート"),
+            st.Page(
+                "pages/310_スライド作成.py",
+                title="スライド作成",
+                icon="📊",
+                url_path="310_スライド作成",
+            ),
         ],
 
         f"{NAV_CONSTRUCTION_ICON} （開発中）Word書類作成支援": [
@@ -128,13 +134,13 @@ pg = st.navigation(
         #     st.Page("pages/35_レッドリスト検索.py", title="レッドリスト検索", icon="🌿", url_path="35_レッドリスト検索"),
         # ],
 
-        # "📕 PDF Tools": [
-        #     st.Page("pages/42_図表見出し抽出.py", title="図表見出し抽出", icon="📕", url_path="42_図表見出し抽出"),
-        #     st.Page("pages/43_頁抽出チェック.py", title="頁抽出チェック", icon="🔍", url_path="43_頁抽出チェック"),
-        #     st.Page("pages/44_頁テキスト抽出.py", title="頁テキスト抽出", icon="📄", url_path="44_頁テキスト抽出"),
-        #     st.Page("pages/56_pdf頁テキスト抽出.py", title="PDF頁テキスト抽出", icon="📄", url_path="56_pdf頁テキスト抽出"),
-        #     st.Page("pages/57_OCRツール.py", title="OCRツール", icon="👁️", url_path="57_OCRツール"),
-        # ],
+        "📕 PDF Tools": [
+            st.Page("pages/42_図表見出し抽出.py", title="図表見出し抽出", icon="📕", url_path="42_図表見出し抽出"),
+            st.Page("pages/43_頁抽出チェック.py", title="頁抽出チェック", icon="🔍", url_path="43_頁抽出チェック"),
+            st.Page("pages/44_頁テキスト抽出.py", title="頁テキスト抽出", icon="📄", url_path="44_頁テキスト抽出"),
+            st.Page("pages/56_pdf頁テキスト抽出.py", title="PDF頁テキスト抽出", icon="📄", url_path="56_pdf頁テキスト抽出"),
+            st.Page("pages/57_OCRツール.py", title="OCRツール", icon="👁️", url_path="57_OCRツール"),
+        ],
 
         # "📄 Word Tools": [
         #     st.Page("pages/61_word内部ファイル抽出.py", title="Word内部ファイル抽出", icon="📦", url_path="61_word内部ファイル抽出"),

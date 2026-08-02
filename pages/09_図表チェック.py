@@ -111,7 +111,7 @@ from lib.chart_check.job_store import save_ai_summary_jsonl_job
 # ページ設定（必須・統一）
 # ============================================================
 st.set_page_config(
-    page_title="🖼️ Text Studio",
+    page_title="Text Studio",
     page_icon="🖼️",
     layout="wide",
 )

@@ -44,31 +44,108 @@ def pdf_to_text_per_page(pdf_path: Path) -> List[str]:
 
 
 # ==== ラベル抽出（目次末尾／本文単独行） ====
+# ALPHAJP = r"[A-Za-z\u3040-\u30FF\u4E00-\u9FFF]+"
+
+# def build_label_tail_regex_mixed() -> re.Pattern:
+#     core_seq    = r"[0-9０-９]{1,6}"
+#     core_chap   = rf"[0-9０-９]+(?:\s*{HY}\s*[0-9０-９]+)+"
+#     core_series = rf"{ALPHAJP}\s*{HY}\s*[0-9０-９]+"
+#     tail = rf"(?P<label>(?:{core_seq}|{core_chap}|{core_series}))"
+#     pat = rf"""
+#         ^(?P<head>.*?)                     # 左側本文
+#         (?:{LEADERS_SPACED}|\s{{2,}})?     # リーダー列/2空白以上
+#         {tail}\s*$                         # 末尾ラベル
+#     """
+#     return re.compile(pat, re.X)
+
+# def build_label_line_regex_mixed() -> re.Pattern:
+#     core_seq    = r"[0-9０-９]{1,6}"
+#     core_chap   = rf"[0-9０-９]+(?:\s*{HY}\s*[0-9０-９]+)+"
+#     series_word = rf"[（(［\[]?{ALPHAJP}[）)\]］]?"
+#     SEP_OPT     = rf"(?:\s*(?:{HY}|[\.．・･])\s*|\s+)?"
+#     core_series = rf"{series_word}{SEP_OPT}[0-9０-９]+"
+#     core = rf"(?:{core_seq}|{core_chap}|{core_series})"
+#     return re.compile(rf"^\s*(?:p(?:age)?\.?\s*)?(?P<label>{core})\s*$", re.MULTILINE)
+
+# LABEL_TAIL_RE = build_label_tail_regex_mixed()
+# LABEL_LINE_RE = build_label_line_regex_mixed()
+
+# ============================================================
+# ラベル抽出用文字パターン
+# ============================================================
 ALPHAJP = r"[A-Za-z\u3040-\u30FF\u4E00-\u9FFF]+"
 
 def build_label_tail_regex_mixed() -> re.Pattern:
-    core_seq    = r"[0-9０-９]{1,6}"
-    core_chap   = rf"[0-9０-９]+(?:\s*{HY}\s*[0-9０-９]+)+"
-    core_series = rf"{ALPHAJP}\s*{HY}\s*[0-9０-９]+"
-    tail = rf"(?P<label>(?:{core_seq}|{core_chap}|{core_series}))"
-    pat = rf"""
-        ^(?P<head>.*?)                     # 左側本文
-        (?:{LEADERS_SPACED}|\s{{2,}})?     # リーダー列/2空白以上
-        {tail}\s*$                         # 末尾ラベル
     """
-    return re.compile(pat, re.X)
+    目次行の末尾からページラベルを抽出する。
+
+    資料1，資料2-1，図表-3，Appendix-1などの
+    シリーズ番号を単独数字より先に判定する。
+    """
+    core_seq = r"[0-9０-９]{1,6}"
+    core_chap = rf"[0-9０-９]+(?:\s*{HY}\s*[0-9０-９]+)+"
+
+    series_word = rf"[（(［\[]?{ALPHAJP}[）)\]］]?"
+    series_sep = rf"(?:\s*(?:{HY}|[\.．・･])\s*|\s+)?"
+    series_number = (
+        rf"[0-9０-９]+"
+        rf"(?:\s*{HY}\s*[0-9０-９]+)*"
+    )
+    core_series = rf"{series_word}{series_sep}{series_number}"
+
+    # ------------------------------------------------------------
+    # シリーズ番号を単独数字より先に判定する
+    #
+    # 例：
+    # 資料1 調査票 ........ 資料1
+    #
+    # core_seqを先にすると，末尾の「1」だけが抽出されるため，
+    # core_seriesを最優先にする。
+    # ------------------------------------------------------------
+    tail = (
+        rf"(?P<label>"
+        rf"(?:{core_series}|{core_chap}|{core_seq})"
+        rf")"
+    )
+
+    pattern = rf"""
+        ^(?P<head>.*?)
+        (?:{LEADERS_SPACED}|\s{{2,}})?
+        {tail}\s*$
+    """
+
+    return re.compile(pattern, re.X)
+
 
 def build_label_line_regex_mixed() -> re.Pattern:
-    core_seq    = r"[0-9０-９]{1,6}"
-    core_chap   = rf"[0-9０-９]+(?:\s*{HY}\s*[0-9０-９]+)+"
+    """
+    PDF各ページの先頭側にある単独行ページラベルを抽出する。
+    """
+    core_seq = r"[0-9０-９]{1,6}"
+    core_chap = rf"[0-9０-９]+(?:\s*{HY}\s*[0-9０-９]+)+"
+
     series_word = rf"[（(［\[]?{ALPHAJP}[）)\]］]?"
-    SEP_OPT     = rf"(?:\s*(?:{HY}|[\.．・･])\s*|\s+)?"
-    core_series = rf"{series_word}{SEP_OPT}[0-9０-９]+"
-    core = rf"(?:{core_seq}|{core_chap}|{core_series})"
-    return re.compile(rf"^\s*(?:p(?:age)?\.?\s*)?(?P<label>{core})\s*$", re.MULTILINE)
+    series_sep = rf"(?:\s*(?:{HY}|[\.．・･])\s*|\s+)?"
+    series_number = (
+        rf"[0-9０-９]+"
+        rf"(?:\s*{HY}\s*[0-9０-９]+)*"
+    )
+    core_series = rf"{series_word}{series_sep}{series_number}"
+
+    core = rf"(?:{core_series}|{core_chap}|{core_seq})"
+
+    return re.compile(
+        rf"^\s*"
+        rf"(?:p(?:age)?\.?\s*)?"
+        rf"(?P<label>{core})"
+        rf"\s*$",
+        re.MULTILINE,
+    )
+
 
 LABEL_TAIL_RE = build_label_tail_regex_mixed()
 LABEL_LINE_RE = build_label_line_regex_mixed()
+
 
 # ==== ページラベル専用の行判定（優先順位付きで使う） ====
 NUM = r"[0-9０-９]{1,6}"
@@ -244,15 +321,56 @@ def scan_lines_for_match(title_raw: str, body: str) -> Tuple[str, str]:
         if title_strict in merged or title_loose in merged:
             return "一致（改行越え）", lines[i] + " / " + lines[i+1]
 
+    # if chap:
+    #     return "未検出", "-"
+    # # 平文タイトルのみ、先頭N文字救済
+    # for klen in (5, 4, 3):
+    #     if len(title_raw) >= klen:
+    #         prefix = title_raw[:klen]
+    #         for ln in lines:
+    #             if prefix in ln:
+    #                 return f"部分一致（{klen}文字）", ln.rstrip("\n")
+    # return "未検出", "-"
+
     if chap:
         return "未検出", "-"
-    # 平文タイトルのみ、先頭N文字救済
+
+    # ------------------------------------------------------------
+    # 平文タイトルのみ，先頭N文字による部分一致
+    #
+    # ページラベルだけの行は一致候補から除外する。
+    #
+    # 例：
+    #   資料 1-1
+    #   資料 1-1 調査票
+    #
+    # 上記の場合，「資料 1-1」ではなく，
+    # 「資料 1-1 調査票」を一致テキスト行として返す。
+    # ------------------------------------------------------------
     for klen in (5, 4, 3):
-        if len(title_raw) >= klen:
-            prefix = title_raw[:klen]
-            for ln in lines:
-                if prefix in ln:
-                    return f"部分一致（{klen}文字）", ln.rstrip("\n")
+        if len(title_raw) < klen:
+            continue
+
+        prefix = title_raw[:klen]
+
+        for ln in lines:
+            line_text = ln.strip()
+
+            if not line_text:
+                continue
+
+            # ページラベルだけの単独行は除外
+            line_normalized = normalize_strict(line_text)
+
+            if LABEL_LINE_RE.fullmatch(line_normalized):
+                continue
+
+            if prefix in ln:
+                return (
+                    f"部分一致（{klen}文字）",
+                    ln.rstrip("\n"),
+                )
+
     return "未検出", "-"
 
 
@@ -269,40 +387,237 @@ def build_segments(pages_text: List[str]) -> List[Dict[str, Any]]:
         })
     return segments
 
+# def _parse_label_kind(label: str) -> Tuple[str, Any]:
+#     lab = z2h_numhy(label)
+#     if re.fullmatch(r"[0-9]+", lab):
+#         return "seq", int(lab)
+#     parts = lab.split("-")
+#     if len(parts) >= 2 and all(p.isdigit() for p in parts):
+#         return "chap", [int(p) for p in parts]
+#     m = re.fullmatch(rf"({ALPHAJP})-([0-9]+)", lab)
+#     if m:
+#         return "series", (m.group(1), int(m.group(2)))
+#     return "unknown", None
+
+# def valid_and_reason_auto(label: str, prev_ok: Optional[str]) -> Tuple[bool, str]:
+#     k, cur = _parse_label_kind(label)
+#     if k == "unknown":
+#         return False, "不明なラベル形式"
+#     if prev_ok is None:
+#         return True, ""
+#     pk, prev = _parse_label_kind(prev_ok)
+#     if pk == "unknown":
+#         return True, ""
+#     if k != pk:
+#         return True, "形式切替"
+#     if k == "seq":
+#         return (cur == prev + 1, "" if cur == prev + 1 else "非連番")
+#     if k == "chap":
+#         c, p = (cur + [1, 1])[:2]; pc, pp = (prev + [1, 1])[:2]
+#         ok = (c == pc and p == pp + 1) or (c == pc + 1 and p == 1)
+#         return (ok, "" if ok else "非連番")
+#     if k == "series":
+#         s, n = cur; ps, pn = prev
+#         if s != ps:
+#             return True, "形式切替"
+#         return (n == pn + 1, "" if n == pn + 1 else "非連番")
+#     return True, ""
+
 def _parse_label_kind(label: str) -> Tuple[str, Any]:
-    lab = z2h_numhy(label)
+    """
+    ページラベルを判定用の種類と数値へ分解する。
+
+    戻り値：
+    - seq
+        1，2，3
+    - chap
+        1-1，1-2，2-1
+    - series
+        資料1，資料2，資料2-1，図表-3，Appendix-1
+    - unknown
+        上記以外
+    """
+    lab = z2h_numhy(label).strip()
+
+    # ------------------------------------------------------------
+    # 単独数字
+    # ------------------------------------------------------------
     if re.fullmatch(r"[0-9]+", lab):
         return "seq", int(lab)
-    parts = lab.split("-")
-    if len(parts) >= 2 and all(p.isdigit() for p in parts):
-        return "chap", [int(p) for p in parts]
-    m = re.fullmatch(rf"({ALPHAJP})-([0-9]+)", lab)
-    if m:
-        return "series", (m.group(1), int(m.group(2)))
+
+    # ------------------------------------------------------------
+    # ハイフン付き数字
+    # ------------------------------------------------------------
+    if re.fullmatch(r"[0-9]+(?:-[0-9]+)+", lab):
+        parts = [int(value) for value in lab.split("-")]
+        return "chap", parts
+
+    # ------------------------------------------------------------
+    # シリーズ番号
+    #
+    # 対応例：
+    # 資料1
+    # 資料 1
+    # 資料-1
+    # 資料．1
+    # 資料・1
+    # 資料2-1
+    # 図表-3
+    # Appendix-1
+    # ------------------------------------------------------------
+    series_pattern = re.compile(
+        rf"^"
+        rf"(?P<series>{ALPHAJP})"
+        rf"(?:\s*(?:{HY}|[\.．・･])\s*|\s+)?"
+        rf"(?P<number>[0-9]+(?:\s*{HY}\s*[0-9]+)*)"
+        rf"$"
+    )
+
+    match = series_pattern.fullmatch(lab)
+
+    if match:
+        series_name = match.group("series").strip()
+        number_text = z2h_numhy(match.group("number"))
+        number_parts = [
+            int(value)
+            for value in number_text.split("-")
+        ]
+
+        return "series", (series_name, number_parts)
+
     return "unknown", None
 
-def valid_and_reason_auto(label: str, prev_ok: Optional[str]) -> Tuple[bool, str]:
-    k, cur = _parse_label_kind(label)
-    if k == "unknown":
+
+def _is_next_number_parts(
+    current: List[int],
+    previous: List[int],
+) -> bool:
+    """
+    階層付き番号が自然に続いているかを確認する。
+
+    正常例：
+    - 1-1 → 1-2
+    - 1-3 → 2-1
+    - 2-2 → 3-1
+    - 2 → 2-1
+    - 2-1 → 2-2
+    - 2-3 → 3
+    """
+    if not current or not previous:
+        return False
+
+    min_len = min(len(current), len(previous))
+
+    # ------------------------------------------------------------
+    # 最初に異なる階層を確認
+    #
+    # 例：
+    # 1-3 → 2-1
+    # 2-2 → 3-1
+    # 1-2-4 → 1-3-1
+    # ------------------------------------------------------------
+    for index in range(min_len):
+        if current[index] == previous[index]:
+            continue
+
+        return (
+            current[:index] == previous[:index]
+            and current[index] == previous[index] + 1
+            and all(value == 1 for value in current[index + 1:])
+        )
+
+    # ------------------------------------------------------------
+    # 既存番号の下位階層が1から始まる
+    #
+    # 例：
+    # 2 → 2-1
+    # 資料2 → 資料2-1
+    # ------------------------------------------------------------
+    if len(current) > len(previous):
+        return (
+            current[:len(previous)] == previous
+            and all(value == 1 for value in current[len(previous):])
+        )
+
+    return False
+
+
+def valid_and_reason_auto(
+    label: str,
+    prev_ok: Optional[str],
+) -> Tuple[bool, str]:
+    """
+    現在のページラベルが，直前の正常ラベルから
+    自然に続いているかを確認する。
+    """
+    kind, current = _parse_label_kind(label)
+
+    if kind == "unknown":
         return False, "不明なラベル形式"
+
     if prev_ok is None:
         return True, ""
-    pk, prev = _parse_label_kind(prev_ok)
-    if pk == "unknown":
+
+    prev_kind, previous = _parse_label_kind(prev_ok)
+
+    if prev_kind == "unknown":
         return True, ""
-    if k != pk:
+
+    # ------------------------------------------------------------
+    # ページラベル体系が切り替わった場合
+    #
+    # 例：
+    # 3 → 資料1
+    # 3 → Appendix-1
+    # ------------------------------------------------------------
+    if kind != prev_kind:
         return True, "形式切替"
-    if k == "seq":
-        return (cur == prev + 1, "" if cur == prev + 1 else "非連番")
-    if k == "chap":
-        c, p = (cur + [1, 1])[:2]; pc, pp = (prev + [1, 1])[:2]
-        ok = (c == pc and p == pp + 1) or (c == pc + 1 and p == 1)
-        return (ok, "" if ok else "非連番")
-    if k == "series":
-        s, n = cur; ps, pn = prev
-        if s != ps:
+
+    # ------------------------------------------------------------
+    # 単独数字
+    # ------------------------------------------------------------
+    if kind == "seq":
+        is_valid = current == previous + 1
+
+        return (
+            is_valid,
+            "" if is_valid else "非連番",
+        )
+
+    # ------------------------------------------------------------
+    # ハイフン付き番号
+    # ------------------------------------------------------------
+    if kind == "chap":
+        is_valid = _is_next_number_parts(
+            current,
+            previous,
+        )
+
+        return (
+            is_valid,
+            "" if is_valid else "非連番",
+        )
+
+    # ------------------------------------------------------------
+    # シリーズ番号
+    # ------------------------------------------------------------
+    if kind == "series":
+        series_name, number_parts = current
+        prev_series_name, prev_number_parts = previous
+
+        if series_name != prev_series_name:
             return True, "形式切替"
-        return (n == pn + 1, "" if n == pn + 1 else "非連番")
+
+        is_valid = _is_next_number_parts(
+            number_parts,
+            prev_number_parts,
+        )
+
+        return (
+            is_valid,
+            "" if is_valid else "非連番",
+        )
+
     return True, ""
 
 def validate_segments(segments: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Tuple[str,int]]]:
