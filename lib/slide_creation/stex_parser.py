@@ -6,7 +6,7 @@
 # 機能：
 # - \set{...}から資料全体の設定を取得する
 # - \begin{frame, type=..., style=...}を解析する
-# - frame内のtitle，subtitle，itemizeなどを取得する
+# - frame内のtitle，subtitle，itemize，画像指定などを取得する
 # - PresentationSettingsとSlideDefinitionへ変換する
 #
 # 方針：
@@ -283,6 +283,8 @@ def _extract_plain_body(
         "message",
         "lefttitle",
         "righttitle",
+        "image",
+        "imagecaption",
     )
 
     for command in known_commands:
@@ -364,6 +366,10 @@ def _parse_settings(
         theme_key=theme_key,
         header_key=header_key,
         footer_key=footer_key,
+        image_path=values.get(
+            "image_path",
+            "inbox",
+        ),
     )
 
 
@@ -445,6 +451,8 @@ def _parse_frame(
         frame_body,
         "message",
     )
+
+
     left_heading = _extract_command_value(
         frame_body,
         "lefttitle",
@@ -452,6 +460,16 @@ def _parse_frame(
     right_heading = _extract_command_value(
         frame_body,
         "righttitle",
+    )
+
+    image_file = _extract_command_value(
+        frame_body,
+        "image",
+    )
+
+    image_caption = _extract_command_value(
+        frame_body,
+        "imagecaption",
     )
 
     itemize_lines = _extract_itemize_lines(
@@ -486,7 +504,23 @@ def _parse_frame(
     else:
         body = _extract_plain_body(frame_body)
 
+    # --------------------------------------------------------
+    # 画像付き本文ページの確認
+    # --------------------------------------------------------
+    if (
+        slide_type == "content"
+        and style_key == "text_image"
+        and not image_file
+    ):
+        errors.append(
+            f"フレーム{frame_number}："
+            "style=text_imageでは"
+            "\\image{...}を指定してください．"
+        )
+        return None
+
     if not title:
+
         warnings.append(
             f"フレーム{frame_number}："
             "\\title{...}がありません．"
@@ -503,8 +537,9 @@ def _parse_frame(
         right_heading=right_heading,
         presenter_name=presenter_name,
         contact_text=contact_text,
+        image_file=image_file,
+        image_caption=image_caption,
     )
-
 
 # ============================================================
 # 公開関数

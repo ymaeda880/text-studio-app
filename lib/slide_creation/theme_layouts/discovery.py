@@ -10,7 +10,7 @@
 #
 # 方針：
 # - registry.pyやthemes.pyへテーマ名を列挙しない
-# - registry，discovery，__init__は検索対象外とする
+# - レイアウト専用モジュールは検索対象外とする
 # - 不正なテーマ定義は明確な例外として扱う
 # ============================================================
 
@@ -30,6 +30,7 @@ from lib.slide_creation.models import SlideTheme
 # ============================================================
 _EXCLUDED_MODULE_NAMES = {
     "__init__",
+    "basic",
     "discovery",
     "registry",
 }

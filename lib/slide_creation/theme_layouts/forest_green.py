@@ -54,6 +54,7 @@ THEME = SlideTheme(
     title_text_color=RGBColor(255, 255, 255),
     body_text_color=RGBColor(39, 75, 49),
     sub_text_color=RGBColor(91, 116, 94),
+    layout_key="forest_green",
     title_font_size=30,
     body_font_size=21,
     footer_font_size=9,

@@ -15,13 +15,21 @@ from __future__ import annotations
 # ============================================================
 # imports
 # ============================================================
+from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageOps
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Inches, Pt
 
-from lib.slide_creation.models import PresentationSettings, SlideTheme
+from lib.slide_creation.models import (
+    PresentationSettings,
+    SlideTheme,
+)
+from lib.slide_creation.slide_image_resolver import (
+    resolve_slide_image_path,
+)
 
 
 # ============================================================
@@ -115,7 +123,123 @@ def add_panel(
 
     return panel
 
+# ============================================================
+# 画像
+# ============================================================
+def add_slide_image(
+    slide: Any,
+    *,
+    image_file: str,
+    image_path: str,
+    inbox_root: Path,
+    sub: str,
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+) -> Any:
+    """
+    SlideTexで指定された画像をPowerPointへ配置する．
 
+    画像パスは，次の優先順位で解決する．
+
+    1．image_fileが絶対パス
+    2．image_pathが空またはinboxの場合はinbox検索
+    3．image_pathで指定されたフォルダーを基準に検索
+
+    画像の縦横比は維持し，
+    指定された領域内へ中央配置する．
+    """
+
+    # --------------------------------------------------------
+    # 画像パス解決
+    # --------------------------------------------------------
+    resolved_path = resolve_slide_image_path(
+        image_file=image_file,
+        image_path=image_path,
+        inbox_root=inbox_root,
+        sub=sub,
+    )
+
+    # --------------------------------------------------------
+    # 画像サイズ取得
+    # --------------------------------------------------------
+    try:
+        with Image.open(resolved_path) as source_image:
+            corrected_image = ImageOps.exif_transpose(
+                source_image
+            )
+            image_width_px, image_height_px = (
+                corrected_image.size
+            )
+
+    except Exception as exc:
+        raise ValueError(
+            "画像サイズを取得できません："
+            f"{resolved_path} / {exc}"
+        ) from exc
+
+    if image_width_px <= 0 or image_height_px <= 0:
+        raise ValueError(
+            "画像サイズが不正です："
+            f"{resolved_path}"
+        )
+
+    # --------------------------------------------------------
+    # 配置領域内へ縦横比を維持して収める
+    # --------------------------------------------------------
+    image_ratio = (
+        float(image_width_px)
+        / float(image_height_px)
+    )
+    box_ratio = float(width) / float(height)
+
+    if image_ratio >= box_ratio:
+        placed_width = float(width)
+        placed_height = placed_width / image_ratio
+
+    else:
+        placed_height = float(height)
+        placed_width = placed_height * image_ratio
+
+    # --------------------------------------------------------
+    # 配置領域の中央へ位置調整
+    # --------------------------------------------------------
+    placed_left = (
+        float(left)
+        + (
+            float(width)
+            - placed_width
+        )
+        / 2.0
+    )
+    placed_top = (
+        float(top)
+        + (
+            float(height)
+            - placed_height
+        )
+        / 2.0
+    )
+
+    # --------------------------------------------------------
+    # PowerPointへ画像を追加
+    # --------------------------------------------------------
+    try:
+        return slide.shapes.add_picture(
+            str(resolved_path),
+            Inches(placed_left),
+            Inches(placed_top),
+            width=Inches(placed_width),
+            height=Inches(placed_height),
+        )
+
+    except Exception as exc:
+        raise RuntimeError(
+            "画像をPowerPointへ貼り込めません："
+            f"{resolved_path} / {exc}"
+        ) from exc
+    
 # ============================================================
 # 箇条書き
 # ============================================================

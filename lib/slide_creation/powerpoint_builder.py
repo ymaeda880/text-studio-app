@@ -19,6 +19,7 @@ from __future__ import annotations
 # imports
 # ============================================================
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from pptx import Presentation
@@ -70,6 +71,8 @@ def create_powerpoint(
     *,
     slides: list[SlideDefinition],
     settings: PresentationSettings,
+    inbox_root: Path,
+    sub: str,
 ) -> bytes:
     if not slides:
         raise ValueError("スライドが1枚も設定されていません．")
@@ -117,6 +120,8 @@ def create_powerpoint(
                 settings=settings,
                 page_number=page_number,
                 theme=theme,
+                inbox_root=inbox_root,
+                sub=sub,
             )
 
     output = BytesIO()

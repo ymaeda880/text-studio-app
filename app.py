@@ -100,10 +100,10 @@ pg = st.navigation(
             st.Page("pages/32_ガントチャート.py", title="ガントチャート", icon="📅", url_path="32_ガントチャート"),
             st.Page("pages/33_フローチャート.py", title="フローチャート", icon="🔀", url_path="33_フローチャート"),
             st.Page(
-                "pages/310_スライド作成.py",
-                title="スライド作成",
+                "pages/310_slideTex.py",
+                title="slideTex",
                 icon="📊",
-                url_path="310_スライド作成",
+                url_path="310_slideTex",
             ),
         ],
 

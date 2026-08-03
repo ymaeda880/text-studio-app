@@ -91,6 +91,7 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         title_text_color=RGBColor(255, 255, 255),
         body_text_color=RGBColor(45, 55, 65),
         sub_text_color=RGBColor(110, 120, 130),
+        layout_key="basic",
     ),
     "simple_light": SlideTheme(
         key="simple_light",
@@ -105,6 +106,7 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         title_text_color=RGBColor(255, 255, 255),
         body_text_color=RGBColor(55, 55, 55),
         sub_text_color=RGBColor(125, 125, 125),
+        layout_key="basic",
     ),
     "modern_dark": SlideTheme(
         key="modern_dark",
@@ -119,6 +121,7 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         title_text_color=RGBColor(255, 255, 255),
         body_text_color=RGBColor(235, 238, 242),
         sub_text_color=RGBColor(165, 172, 185),
+        layout_key="basic",
     ),
     "academic_green": SlideTheme(
         key="academic_green",
@@ -133,6 +136,7 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         title_text_color=RGBColor(255, 255, 255),
         body_text_color=RGBColor(45, 65, 58),
         sub_text_color=RGBColor(105, 125, 118),
+        layout_key="basic",
     ),
 }
 
@@ -214,6 +218,14 @@ TITLE_STYLES: dict[str, SelectionOption] = {
         key="centered",
         label="中央配置",
         description="タイトルとサブタイトルを中央に配置します．",
+    ),
+    "vertical_info": SelectionOption(
+        key="vertical_info",
+        label="下部情報を縦に配置",
+        description=(
+            "タイトルとサブタイトルを中央に配置し，"
+            "会社名，発表者名，日付を下部へ縦に配置します．"
+        ),
     ),
     "full_color": SelectionOption(
         key="full_color",
@@ -305,6 +317,14 @@ CONTENT_STYLES: dict[str, SelectionOption] = {
         key="message",
         label="メッセージ強調",
         description="重要な短いメッセージを中央へ大きく表示します．",
+    ),
+    "text_image": SelectionOption(
+        key="text_image",
+        label="文章＋画像",
+        description=(
+            "左側に文章を配置し，"
+            "右側に画像を配置します．"
+        ),
     ),
 }
 

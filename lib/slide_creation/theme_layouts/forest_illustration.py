@@ -50,6 +50,7 @@ THEME = SlideTheme(
     title_text_color=RGBColor(255, 255, 255),
     body_text_color=RGBColor(54, 79, 57),
     sub_text_color=RGBColor(108, 132, 104),
+    layout_key="forest_illustration",
     title_font_size=30,
     body_font_size=21,
     footer_font_size=9,
@@ -70,6 +71,97 @@ def render_title(
     forest_illustrationのタイトルページを描画する．
     """
 
+    style_key = slide_def.style_key
+
+    # ========================================================
+    # 下部情報を縦に配置
+    # ========================================================
+    if style_key == "vertical_info":
+        add_textbox(
+            slide,
+            left=1.65,
+            top=1.75,
+            width=10.00,
+            height=1.30,
+            text=slide_def.title,
+            theme=theme,
+            font_size=38,
+            color=theme.body_text_color,
+            bold=True,
+            alignment=PP_ALIGN.CENTER,
+            vertical_anchor=MSO_ANCHOR.MIDDLE,
+        )
+
+        add_textbox(
+            slide,
+            left=2.00,
+            top=3.10,
+            width=9.30,
+            height=0.70,
+            text=slide_def.subtitle,
+            theme=theme,
+            font_size=19,
+            color=theme.sub_text_color,
+            alignment=PP_ALIGN.CENTER,
+            vertical_anchor=MSO_ANCHOR.MIDDLE,
+        )
+
+        presenter_name = (
+            slide_def.presenter_name
+            or settings.presenter_name
+        )
+
+        if settings.company_name:
+            add_textbox(
+                slide,
+                left=2.00,
+                top=5.10,
+                width=9.30,
+                height=0.35,
+                text=settings.company_name,
+                theme=theme,
+                font_size=11,
+                color=theme.sub_text_color,
+                alignment=PP_ALIGN.CENTER,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
+
+        if presenter_name:
+            add_textbox(
+                slide,
+                left=2.00,
+                top=5.52,
+                width=9.30,
+                height=0.40,
+                text=presenter_name,
+                theme=theme,
+                font_size=14,
+                color=theme.body_text_color,
+                bold=True,
+                alignment=PP_ALIGN.CENTER,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
+
+        if settings.presentation_date:
+            add_textbox(
+                slide,
+                left=2.00,
+                top=6.00,
+                width=9.30,
+                height=0.35,
+                text=settings.presentation_date,
+                theme=theme,
+                font_size=11,
+                color=theme.sub_text_color,
+                alignment=PP_ALIGN.CENTER,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
+
+        return
+
+    # ========================================================
+    # 標準タイトル
+    # ========================================================
     add_textbox(
         slide,
         left=1.65,
@@ -125,7 +217,6 @@ def render_title(
         alignment=PP_ALIGN.CENTER,
         vertical_anchor=MSO_ANCHOR.MIDDLE,
     )
-
 
 # ============================================================
 # 見出しページ

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# text_studio_app/pages/310_スライド作成.py
+# text_studio_app/pages/310_slideTex.py
 # ============================================================
 # 📊 PowerPointスライド作成（SlideTex / 非AI）
 #
@@ -58,7 +58,12 @@ SS_STEX_HASH = f"{PAGE_NAME}__stex_hash"
 # ============================================================
 # common_lib
 # ============================================================
-from common_lib.ui.page_header import render_standard_page_header
+from common_lib.inbox.inbox_common.paths import (
+    resolve_inbox_root,
+)
+from common_lib.ui.page_header import (
+    render_standard_page_header,
+)
 
 # ============================================================
 # lib
@@ -89,7 +94,7 @@ from lib.slide_creation.themes import (
 # ページ設定
 # ============================================================
 st.set_page_config(
-    page_title="📄 Text Studio",
+    page_title="Text Studio",
     page_icon="📄",
     layout="wide",
 )
@@ -104,11 +109,17 @@ sub, theme, BANNER_KEY, settings = render_standard_page_header(
     app_dir=APP_DIR,
     app_name=APP_NAME,
     page_name=PAGE_NAME,
-    title="📊 スライド作成",
-    subtitle_text="SlideTexファイルからPowerPointを作成",
+    title="📊 slideTex",
+    subtitle_text="slideTexファイルからPowerPointを作成",
     default_banner_key="purple_light",
 )
 
+# ============================================================
+# Inboxルート
+# ============================================================
+INBOX_ROOT = resolve_inbox_root(
+    PROJECTS_ROOT
+)
 
 # ============================================================
 # ページ説明
@@ -321,6 +332,8 @@ if parse_result is not None:
             pptx_data = create_powerpoint(
                 slides=parse_result.slides,
                 settings=parse_result.settings,
+                inbox_root=INBOX_ROOT,
+                sub=sub,
             )
 
             st.session_state[SS_PPTX_DATA] = pptx_data

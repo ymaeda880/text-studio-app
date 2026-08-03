@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 # text_studio_app/lib/slide_creation/theme_layouts/registry.py
 # ============================================================
-# テーマ専用レイアウト 動的読込・振り分け
+# テーマレイアウト 動的読込・振り分け
 #
 # 機能：
-# - テーマキーに対応するテーマモジュールを動的に読み込む
-# - タイトル，見出し，小見出しの専用描画を呼び出す
+# - テーマが指定するレイアウトモジュールを動的に読み込む
+# - ページ種別ごとの描画関数を呼び出す
+# - 専用描画がない場合はbasicレイアウトを使用する
 #
 # 方針：
-# - テーマ名とPythonファイル名を一致させる
+# - 色テーマとページレイアウトを分離する
+# - layout_keyとPythonファイル名を一致させる
 # - テーマ追加時に登録辞書を編集しない
-# - 専用レイアウトがない場合はFalseを返す
 # ============================================================
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from __future__ import annotations
 # ============================================================
 import importlib
 from functools import lru_cache
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -31,24 +33,48 @@ from lib.slide_creation.models import (
 
 
 # ============================================================
-# テーマモジュール読込
+# 共通レイアウト
+# ============================================================
+_BASIC_LAYOUT_KEY = "basic"
+
+
+# ============================================================
+# レイアウトキー取得
+# ============================================================
+def _resolve_layout_key(
+    theme: SlideTheme,
+) -> str:
+    """
+    テーマが使用するレイアウトキーを返す．
+
+    layout_keyが空の場合は，テーマキーを使用する．
+    """
+
+    layout_key = str(theme.layout_key or "").strip()
+
+    if layout_key:
+        return layout_key
+
+    return str(theme.key or "").strip()
+
+
+# ============================================================
+# レイアウトモジュール読込
 # ============================================================
 @lru_cache(maxsize=None)
-def _load_theme_layout_module(
-    theme_key: str,
+def _load_layout_module(
+    layout_key: str,
 ) -> ModuleType | None:
     """
-    テーマキーに対応するテーマ専用モジュールを読み込む．
+    レイアウトキーに対応するモジュールを読み込む．
 
     例：
-        forest_green
+        basic
         ↓
-        lib.slide_creation.theme_layouts.forest_green
-
-    対応するモジュールがない場合はNoneを返す．
+        lib.slide_creation.theme_layouts.basic
     """
 
-    cleaned_key = theme_key.strip()
+    cleaned_key = str(layout_key or "").strip()
 
     if not cleaned_key:
         return None
@@ -62,13 +88,13 @@ def _load_theme_layout_module(
         return importlib.import_module(module_name)
 
     except ModuleNotFoundError as exc:
-        # 指定したテーマモジュール自体がない場合だけ，
-        # 専用レイアウトなしとして扱う．
+        # 指定したモジュール自体がない場合だけ，
+        # レイアウトなしとして扱う．
         if exc.name == module_name:
             return None
 
-        # テーマモジュール内の別importが失敗した場合は，
-        # 原因を隠さずそのまま送出する．
+        # モジュール内部の別importが失敗した場合は，
+        # 原因を隠さない．
         raise
 
 
@@ -77,28 +103,49 @@ def _load_theme_layout_module(
 # ============================================================
 def _get_renderer(
     *,
-    theme_key: str,
+    theme: SlideTheme,
     renderer_name: str,
 ) -> Any | None:
     """
-    テーマモジュールから指定した描画関数を取得する．
+    テーマが指定するレイアウトから描画関数を取得する．
+
+    指定レイアウトに関数がない場合は，
+    basicレイアウトから取得する．
     """
 
-    module = _load_theme_layout_module(theme_key)
+    layout_key = _resolve_layout_key(theme)
 
-    if module is None:
-        return None
+    module = _load_layout_module(layout_key)
 
-    renderer = getattr(
-        module,
-        renderer_name,
-        None,
-    )
+    if module is not None:
+        renderer = getattr(
+            module,
+            renderer_name,
+            None,
+        )
 
-    if not callable(renderer):
-        return None
+        if callable(renderer):
+            return renderer
 
-    return renderer
+    # --------------------------------------------------------
+    # basicへのフォールバック
+    # --------------------------------------------------------
+    if layout_key != _BASIC_LAYOUT_KEY:
+        basic_module = _load_layout_module(
+            _BASIC_LAYOUT_KEY,
+        )
+
+        if basic_module is not None:
+            renderer = getattr(
+                basic_module,
+                renderer_name,
+                None,
+            )
+
+            if callable(renderer):
+                return renderer
+
+    return None
 
 
 # ============================================================
@@ -111,14 +158,8 @@ def render_registered_title(
     settings: PresentationSettings,
     theme: SlideTheme,
 ) -> bool:
-    """
-    テーマ専用タイトルページを描画する．
-
-    専用関数がない場合はFalseを返す．
-    """
-
     renderer = _get_renderer(
-        theme_key=theme.key,
+        theme=theme,
         renderer_name="render_title",
     )
 
@@ -144,14 +185,8 @@ def render_registered_section(
     slide_def: SlideDefinition,
     theme: SlideTheme,
 ) -> bool:
-    """
-    テーマ専用見出しページを描画する．
-
-    専用関数がない場合はFalseを返す．
-    """
-
     renderer = _get_renderer(
-        theme_key=theme.key,
+        theme=theme,
         renderer_name="render_section",
     )
 
@@ -176,14 +211,8 @@ def render_registered_subsection(
     slide_def: SlideDefinition,
     theme: SlideTheme,
 ) -> bool:
-    """
-    テーマ専用小見出しページを描画する．
-
-    専用関数がない場合はFalseを返す．
-    """
-
     renderer = _get_renderer(
-        theme_key=theme.key,
+        theme=theme,
         renderer_name="render_subsection",
     )
 
@@ -193,6 +222,76 @@ def render_registered_subsection(
     renderer(
         slide,
         slide_def=slide_def,
+        theme=theme,
+    )
+
+    return True
+
+
+# ============================================================
+# 本文ページ描画
+# ============================================================
+# ============================================================
+# 本文ページ描画
+# ============================================================
+def render_registered_content(
+    slide: Any,
+    *,
+    slide_def: SlideDefinition,
+    settings: PresentationSettings,
+    page_number: int,
+    theme: SlideTheme,
+    inbox_root: Path,
+    sub: str,
+) -> bool:
+    """
+    テーマレイアウトの本文ページを描画する．
+
+    描画関数がない場合はFalseを返す．
+    """
+
+    renderer = _get_renderer(
+        theme=theme,
+        renderer_name="render_content",
+    )
+
+    if renderer is None:
+        return False
+
+    renderer(
+        slide,
+        slide_def=slide_def,
+        settings=settings,
+        page_number=page_number,
+        theme=theme,
+        inbox_root=inbox_root,
+        sub=sub,
+    )
+
+    return True
+
+# ============================================================
+# 最終ページ描画
+# ============================================================
+def render_registered_ending(
+    slide: Any,
+    *,
+    slide_def: SlideDefinition,
+    settings: PresentationSettings,
+    theme: SlideTheme,
+) -> bool:
+    renderer = _get_renderer(
+        theme=theme,
+        renderer_name="render_ending",
+    )
+
+    if renderer is None:
+        return False
+
+    renderer(
+        slide,
+        slide_def=slide_def,
+        settings=settings,
         theme=theme,
     )
 
