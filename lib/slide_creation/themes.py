@@ -326,8 +326,23 @@ CONTENT_STYLES: dict[str, SelectionOption] = {
             "右側に画像を配置します．"
         ),
     ),
+    "table": SelectionOption(
+        key="table",
+        label="表",
+        description=(
+            "タイトルの下に説明文，表，補足を"
+            "縦方向に配置します．"
+        ),
+    ),
+    "text_table": SelectionOption(
+        key="text_table",
+        label="文章＋表",
+        description=(
+            "左側に文章を配置し，"
+            "右側に表を配置します．"
+        ),
+    ),
 }
-
 
 # ============================================================
 # 最終ページ

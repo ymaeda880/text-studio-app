@@ -28,6 +28,15 @@ from lib.slide_creation.models import (
     PresentationSettings,
     SlideDefinition,
 )
+
+from lib.slide_creation.table.parser import (
+    extract_table_definition,
+    remove_table_environment,
+)
+from lib.slide_creation.table.validator import (
+    validate_table_definition,
+)
+
 from lib.slide_creation.themes import (
     DEFAULT_FOOTER_KEY,
     DEFAULT_HEADER_KEY,
@@ -258,6 +267,13 @@ def _extract_plain_body(
 ) -> str:
     text = frame_body
 
+    # --------------------------------------------------------
+    # table環境を通常本文から除外する
+    # --------------------------------------------------------
+    text = remove_table_environment(
+        text,
+    )
+
     text = _ITEMIZE_PATTERN.sub("", text)
 
     for environment_name in ("left", "right"):
@@ -285,6 +301,8 @@ def _extract_plain_body(
         "righttitle",
         "image",
         "imagecaption",
+        "description",
+        "note",
     )
 
     for command in known_commands:
@@ -472,9 +490,20 @@ def _parse_frame(
         "imagecaption",
     )
 
+    description = _extract_command_value(
+        frame_body,
+        "description",
+    )
+
+    note = _extract_command_value(
+        frame_body,
+        "note",
+    )
+
     itemize_lines = _extract_itemize_lines(
         frame_body
     )
+
     left_lines = _extract_environment_items(
         frame_body,
         "left",
@@ -483,6 +512,26 @@ def _parse_frame(
         frame_body,
         "right",
     )
+
+    # --------------------------------------------------------
+    # 表取得
+    # --------------------------------------------------------
+    table = extract_table_definition(
+        frame_body,
+        frame_number=frame_number,
+        errors=errors,
+        warnings=warnings,
+    )
+
+    if table is not None:
+        table_errors = validate_table_definition(
+            table,
+            frame_number=frame_number,
+        )
+
+        errors.extend(
+            table_errors,
+        )
 
     if style_key in {"two_column", "comparison"}:
         body_lines: list[str] = []
@@ -519,6 +568,36 @@ def _parse_frame(
         )
         return None
 
+    # --------------------------------------------------------
+    # 表スライドの確認
+    # --------------------------------------------------------
+    if (
+        slide_type == "content"
+        and style_key in {
+            "table",
+            "text_table",
+        }
+        and table is None
+    ):
+        errors.append(
+            f"フレーム{frame_number}："
+            f"style={style_key}では"
+            "\\begin{table,...}から"
+            "\\end{table}までを指定してください．"
+        )
+        return None
+
+    if (
+        table is not None
+        and slide_type != "content"
+    ):
+        errors.append(
+            f"フレーム{frame_number}："
+            "tableはtype=contentの"
+            "フレーム内で使用してください．"
+        )
+        return None
+    
     if not title:
 
         warnings.append(
@@ -537,8 +616,11 @@ def _parse_frame(
         right_heading=right_heading,
         presenter_name=presenter_name,
         contact_text=contact_text,
+        description=description,
+        note=note,
         image_file=image_file,
         image_caption=image_caption,
+        table=table,
     )
 
 # ============================================================

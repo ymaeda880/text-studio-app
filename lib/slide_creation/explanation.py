@@ -24,7 +24,7 @@ from common_lib.ui.intro_panel import (
     render_info_card_bullets_compact_custom,
     render_info_card_compact,
 )
-
+from common_lib.ui.tab_style import apply_tab_css
 
 # ============================================================
 # ページ上部説明UI
@@ -125,6 +125,9 @@ def render_slide_creation_logic_expander(
         theme=theme,
         banner_key=banner_key,
         expanded=False,
+         before_tabs=lambda: apply_tab_css(
+            columns=5,
+        ),
     )
 
 
@@ -224,6 +227,41 @@ SlideTexファイルは，次の2つで構成します．
 
 ---
 
+##### スライドの定義
+
+各スライドは，次の形式で記述します．
+
+```text
+\begin{frame, type=content, style=bullet}
+\title{主な機能}
+
+\begin{itemize}
+\item 文書検索
+\item RAGチャット
+\item 議事録作成
+\end{itemize}
+
+\end{frame}
+```
+
+`\begin{frame, ...}`から`\end{frame}`までが，
+PowerPointのスライド1枚に対応します．
+
+`type`にはスライドの役割を指定し，
+`style`にはデザインを指定します．
+
+画像を配置する構文は「画像」タブ，
+表を配置する構文は「表」タブを参照してください．
+
+</div>
+"""
+
+
+# ============================================================
+# 詳細説明：画像
+# ============================================================
+IMAGE_TEXT = r"""
+
 ##### 画像の検索場所
 
 `image_path`には，スライドで使用する画像の検索場所を指定します．
@@ -278,31 +316,6 @@ SlideTexファイルは，次の2つで構成します．
     /Users/macmini2025/Documents/images/forest_observation_map.png
 }
 ```
-
----
-
-##### スライドの定義
-
-各スライドは，次の形式で記述します．
-
-```text
-\begin{frame, type=content, style=bullet}
-\title{主な機能}
-
-\begin{itemize}
-\item 文書検索
-\item RAGチャット
-\item 議事録作成
-\end{itemize}
-\end{frame}
-```
-
-`\begin{frame, ...}`から`\end{frame}`までが，
-PowerPointのスライド1枚に対応します．
-
-`type`にはスライドの役割を指定し，
-`style`にはデザインを指定します．
-
 
 ---
 
@@ -367,10 +380,318 @@ PowerPointのスライド1枚に対応します．
 `\image{...}`の指定が必要です．
 
 </div>
-
-
-
 """
+
+
+# ============================================================
+# 詳細説明：表
+# ============================================================
+TABLE_TEXT = r"""
+
+##### 表を配置する本文ページ
+
+表を大きく配置する場合は，
+本文ページに`style=table`を指定します．
+
+```text
+\begin{frame,
+    type=content,
+    style=table
+}
+
+\title{年度別売上}
+
+\begin{table,
+    style=grid,
+    header={1,1}
+}
+
+\caption{表1　年度別売上}
+
+項目,2024年,2025年//
+売上,100,120//
+費用,80,90//
+利益,20,{3,000}
+
+\end{table}
+
+\end{frame}
+```
+
+`style=table`では，
+タイトルの下へ表を大きく配置します．
+
+表の前に説明文を表示する場合は，
+`\description{...}`を指定します．
+
+```text
+\description{
+2025年は，売上の増加に対して
+費用の増加が抑えられています．
+}
+```
+
+表の下に補足を表示する場合は，
+`\note{...}`を指定します．
+
+```text
+\note{
+単位：百万円
+}
+```
+
+`\description{...}`と`\note{...}`は任意です．
+
+指定がない場合は，説明文または補足を表示せず，
+表の表示領域を広く使用します．
+
+---
+
+##### 左側に文章・右側に表を配置する
+
+左側に文章，右側に表を配置する場合は，
+`style=text_table`を指定します．
+
+```text
+\begin{frame,
+    type=content,
+    style=text_table
+}
+
+\title{2025年度 売上分析}
+
+\begin{itemize}
+
+\item 2025年度は売上が増加した
+\item 利益率も前年より改善した
+\item 関東地区の伸びが大きい
+
+\end{itemize}
+
+\begin{table,
+    style=grid,
+    header={1,1}
+}
+
+\caption{表1　地域別売上}
+
+項目,関東,関西,中部//
+売上,{3,000},{2,400},{1,800}//
+利益,520,410,250
+
+\end{table}
+
+\end{frame}
+```
+
+`style=text_table`では，
+
+- 左側に`\begin{itemize}...\end{itemize}`の文章
+- 右側に`\begin{table,...}...\end{table}`の表
+
+を配置します．
+
+右側の表の上に説明文を表示する場合は，
+`\description{...}`を指定します．
+
+右側の表の下に補足を表示する場合は，
+`\note{...}`を指定します．
+
+---
+
+##### tableの基本構文
+
+表は，次の形式で記述します．
+
+```text
+\begin{table,
+    style=grid,
+    header={1,1}
+}
+
+\caption{表1　年度別売上}
+
+項目,2024年,2025年//
+売上,100,120//
+費用,80,90//
+利益,20,{3,000}
+
+\end{table}
+```
+
+表の主な構成は次のとおりです．
+
+- `style`：表の見た目
+- `header`：ヘッダーとして扱う行数・列数
+- `\caption{...}`：表題
+- `,`：セルの区切り
+- `//`：行の区切り
+
+---
+
+##### tableのheader
+
+`header`は，表の先頭から何行・何列を
+ヘッダーとして扱うかを指定します．
+
+```text
+header={1}
+```
+
+第1行をヘッダーとして扱います．
+
+```text
+header={2}
+```
+
+第1行から第2行までをヘッダーとして扱います．
+
+```text
+header={0,1}
+```
+
+第1列をヘッダーとして扱います．
+
+```text
+header={1,1}
+```
+
+第1行と第1列をヘッダーとして扱います．
+
+2つの値を指定する場合は，
+
+```text
+header={ヘッダー行数,ヘッダー列数}
+```
+
+という順番です．
+
+---
+
+##### カンマを含むセル
+
+セル内の文字列にカンマを含む場合は，
+セル全体を`{...}`で囲みます．
+
+```text
+売上,{3,000},{2,400},{1,800}
+```
+
+この例では，`3,000`，`2,400`，`1,800`が，
+それぞれ1つのセルとして扱われます．
+
+`{...}`で囲まない場合は，
+カンマがセルの区切りとして解釈されます．
+
+---
+
+##### セル内改行
+
+セル内で改行する場合は，
+`<改行>`を使用します．
+
+```text
+担当,{田中<改行>佐藤},鈴木,山田
+```
+
+PowerPoint上では，1つのセル内で次のように表示されます．
+
+```text
+田中
+佐藤
+```
+
+---
+
+##### セル結合
+
+上のセルと縦方向に結合する場合は，
+`<同上>`を使用します．
+
+```text
+担当,田中,鈴木//
+担当,<同上>,佐藤
+```
+
+左側のセルと横方向に結合する場合は，
+`<同左>`を使用します．
+
+```text
+項目,評価1,評価2//
+売上,良好,<同左>
+```
+
+`<同上>`は第1行では使用できません．
+
+`<同左>`は第1列では使用できません．
+
+結合範囲は，連続した長方形になるように
+指定してください．
+
+---
+
+##### tableで使用できるstyle
+
+表自体の見た目は，
+`\begin{table,...}`内の`style`で指定します．
+
+現在は次の表スタイルを使用できます．
+
+- `simple`
+- `grid`
+- `banded`
+- `accent`
+- `minimal`
+
+```text
+\begin{table,
+    style=grid,
+    header={1,1}
+}
+```
+
+`simple`は，装飾を抑えた標準的な表です．
+
+`grid`は，縦横の罫線を表示する業務資料向けの表です．
+
+`banded`は，行ごとに背景色を切り替えます．
+
+`accent`は，ヘッダー行やヘッダー列を
+テーマ色で強調します．
+
+`minimal`は，罫線や背景色を抑えた
+簡潔な表です．
+
+フレーム側の`style=table`または
+`style=text_table`は，スライド内の配置を指定します．
+
+table環境側の`style=grid`などは，
+表自体の見た目を指定します．
+
+```text
+\begin{frame,
+    type=content,
+    style=text_table
+}
+
+...
+
+\begin{table,
+    style=grid,
+    header={1,1}
+}
+```
+
+この例では，
+
+- `style=text_table`：左文章・右表の配置
+- `style=grid`：表の罫線や色
+
+をそれぞれ指定しています．
+
+</div>
+"""
+
 
 
 # ============================================================
@@ -1721,6 +2042,8 @@ HELP_TABS = [
     ("SlideTex構文", STEX_TEXT),
     ("ページ種別", TYPE_TEXT),
     ("スタイル", STYLE_TEXT),
+    ("画像", IMAGE_TEXT),
+    ("表", TABLE_TEXT),
     ("テーマ", THEME_TEXT),
     ("ヘッダー", HEADER_TEXT),
     ("フッター", FOOTER_TEXT),

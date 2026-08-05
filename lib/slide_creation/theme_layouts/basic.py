@@ -46,7 +46,9 @@ from lib.slide_creation.models import (
     SlideDefinition,
     SlideTheme,
 )
-
+from lib.slide_creation.table.renderer import (
+    render_table,
+)
 
 # ============================================================
 # スライドサイズ
@@ -736,12 +738,282 @@ def render_content(
 
     lines = split_body_lines(slide_def.body)
 
-    lines = split_body_lines(slide_def.body)
+    # --------------------------------------------------------
+    # 表
+    #
+    # 配置順：
+    # - description（任意）
+    # - table
+    # - note（任意）
+    # --------------------------------------------------------
+    if slide_def.style_key == "table":
+        if slide_def.table is None:
+            raise ValueError(
+                "style=tableですが，"
+                "表データが設定されていません．"
+            )
+
+        # ----------------------------------------------------
+        # 表全体のパネル
+        # ----------------------------------------------------
+        add_panel(
+            slide,
+            left=0.75,
+            top=1.40,
+            width=11.85,
+            height=4.85,
+            theme=theme,
+        )
+
+        # ----------------------------------------------------
+        # パネル内部の配置領域
+        # ----------------------------------------------------
+        inner_left = 1.05
+        inner_top = 1.62
+        inner_width = 11.25
+        inner_bottom = 6.02
+
+        description_height = (
+            0.62
+            if slide_def.description
+            else 0.0
+        )
+
+        note_height = (
+            0.52
+            if slide_def.note
+            else 0.0
+        )
+
+        description_gap = (
+            0.10
+            if slide_def.description
+            else 0.0
+        )
+
+        note_gap = (
+            0.10
+            if slide_def.note
+            else 0.0
+        )
+
+        # ----------------------------------------------------
+        # 説明文
+        # ----------------------------------------------------
+        if slide_def.description:
+            add_textbox(
+                slide,
+                left=inner_left,
+                top=inner_top,
+                width=inner_width,
+                height=description_height,
+                text=slide_def.description,
+                theme=theme,
+                font_size=14,
+                color=theme.body_text_color,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
+
+        table_top = (
+            inner_top
+            + description_height
+            + description_gap
+        )
+
+        table_bottom = (
+            inner_bottom
+            - note_height
+            - note_gap
+        )
+
+        table_height = (
+            table_bottom
+            - table_top
+        )
+
+        # ----------------------------------------------------
+        # 表
+        # ----------------------------------------------------
+        render_table(
+            slide,
+            table_definition=slide_def.table,
+            theme=theme,
+            left=inner_left,
+            top=table_top,
+            width=inner_width,
+            height=table_height,
+        )
+
+        # ----------------------------------------------------
+        # 補足
+        # ----------------------------------------------------
+        if slide_def.note:
+            add_textbox(
+                slide,
+                left=inner_left,
+                top=table_bottom + note_gap,
+                width=inner_width,
+                height=note_height,
+                text=slide_def.note,
+                theme=theme,
+                font_size=12,
+                color=theme.sub_text_color,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
+
+    # --------------------------------------------------------
+    # 左文章・右表
+    #
+    # 左側：
+    # - itemizeまたは本文
+    #
+    # 右側：
+    # - description（任意）
+    # - table
+    # - note（任意）
+    # --------------------------------------------------------
+    elif slide_def.style_key == "text_table":
+        if slide_def.table is None:
+            raise ValueError(
+                "style=text_tableですが，"
+                "表データが設定されていません．"
+            )
+
+        # ----------------------------------------------------
+        # 左側文章パネル
+        # ----------------------------------------------------
+        add_panel(
+            slide,
+            left=0.75,
+            top=1.40,
+            width=5.85,
+            height=4.85,
+            theme=theme,
+        )
+
+        add_bullet_text(
+            slide,
+            lines=lines,
+            left=1.05,
+            top=1.75,
+            width=5.20,
+            height=4.00,
+            theme=theme,
+        )
+
+        # ----------------------------------------------------
+        # 右側表パネル
+        # ----------------------------------------------------
+        add_panel(
+            slide,
+            left=6.75,
+            top=1.40,
+            width=5.85,
+            height=4.85,
+            theme=theme,
+        )
+
+        # ----------------------------------------------------
+        # 右側パネル内部の配置領域
+        # ----------------------------------------------------
+        table_area_left = 7.05
+        table_area_top = 1.62
+        table_area_width = 5.25
+        table_area_bottom = 6.02
+
+        description_height = (
+            0.62
+            if slide_def.description
+            else 0.0
+        )
+
+        note_height = (
+            0.52
+            if slide_def.note
+            else 0.0
+        )
+
+        description_gap = (
+            0.10
+            if slide_def.description
+            else 0.0
+        )
+
+        note_gap = (
+            0.10
+            if slide_def.note
+            else 0.0
+        )
+
+        # ----------------------------------------------------
+        # 表の説明文
+        # ----------------------------------------------------
+        if slide_def.description:
+            add_textbox(
+                slide,
+                left=table_area_left,
+                top=table_area_top,
+                width=table_area_width,
+                height=description_height,
+                text=slide_def.description,
+                theme=theme,
+                font_size=12,
+                color=theme.body_text_color,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
+
+        table_top = (
+            table_area_top
+            + description_height
+            + description_gap
+        )
+
+        table_bottom = (
+            table_area_bottom
+            - note_height
+            - note_gap
+        )
+
+        table_height = (
+            table_bottom
+            - table_top
+        )
+
+        # ----------------------------------------------------
+        # 表
+        # ----------------------------------------------------
+        render_table(
+            slide,
+            table_definition=slide_def.table,
+            theme=theme,
+            left=table_area_left,
+            top=table_top,
+            width=table_area_width,
+            height=table_height,
+        )
+
+        # ----------------------------------------------------
+        # 補足
+        # ----------------------------------------------------
+        if slide_def.note:
+            add_textbox(
+                slide,
+                left=table_area_left,
+                top=table_bottom + note_gap,
+                width=table_area_width,
+                height=note_height,
+                text=slide_def.note,
+                theme=theme,
+                font_size=11,
+                color=theme.sub_text_color,
+                vertical_anchor=MSO_ANCHOR.MIDDLE,
+            )
 
     # --------------------------------------------------------
     # 左文章・右画像
     # --------------------------------------------------------
-    if slide_def.style_key == "text_image":
+    elif slide_def.style_key == "text_image":
+
         # ----------------------------------------------------
         # 左側文章パネル
         # ----------------------------------------------------
