@@ -28,6 +28,14 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 
 # ============================================================
+# 説明UI
+# ============================================================
+from lib.explanations.exp_AIchat import (
+    render_ai_chat_page_intro,
+    render_ai_chat_help_expander,
+)
+
+# ============================================================
 # sys.path（テンプレ準拠：common_lib を import できるように）
 # - MONO_ROOT / PROJ_DIR / APP_DIR を sys.path に入れる
 # - PROJECTS_ROOT は MONO_ROOT（全ページで意味を揃える）
@@ -114,6 +122,20 @@ st.caption(
 )
 
 # ============================================================
+# ページ説明
+# ============================================================
+render_ai_chat_page_intro()
+render_ai_chat_help_expander()
+
+# ============================================================
+# AI送信用履歴の制限
+# ============================================================
+# 画面表示・JSON保存・TXT保存では全履歴を保持する．
+# AIへ送信する履歴だけを，直近10往復・最大30,000文字に制限する．
+PROMPT_HISTORY_MAX_MESSAGES = 20
+PROMPT_HISTORY_MAX_CHARS = 30000
+
+# ============================================================
 # Session state
 # ============================================================
 def _ensure_state() -> None:
@@ -143,7 +165,10 @@ def _ensure_state() -> None:
     # 最大出力トークン（テンプレ準拠：session_state 正本）
     st.session_state.setdefault("chat_max_output_tokens", 8000)
 
-
+    # AIへ送信した履歴の範囲
+    st.session_state.setdefault("chat_last_history_message_count", 0)
+    st.session_state.setdefault("chat_last_history_char_count", 0)
+    st.session_state.setdefault("chat_last_history_truncated", False)
 
 _ensure_state()
 
@@ -187,33 +212,192 @@ def _gemini_available() -> bool:
     except Exception:
         return False
 
-def _build_prompt_from_history(latest_user_text: str) -> str:
-    doc_text = _get_doc_context_text()
 
-    lines: List[str] = []
-    for m in st.session_state.chat_messages:
-        role = (m.get("role") or "").strip()
-        content = (m.get("content") or "").strip()
+def _history_role_label(role: str) -> str:
+    """
+    履歴をプロンプトへ入れる際の役割名を返す．
+    """
+    normalized_role = str(role or "").strip()
+
+    if normalized_role == "user":
+        return "ユーザー"
+
+    if normalized_role == "assistant":
+        return "アシスタント"
+
+    if normalized_role == "system":
+        return "システム"
+
+    return normalized_role or "不明"
+
+
+def _build_limited_history_block() -> tuple[str, int, int, bool]:
+    """
+    AIへ送信する会話履歴を作成する．
+
+    方針：
+    - 画面表示用の chat_messages 自体は変更しない
+    - 新しい履歴を優先する
+    - 最大20メッセージ（おおむね10往復）に制限する
+    - 合計30,000文字以内に制限する
+    - 最新メッセージ1件だけで上限を超える場合は末尾を残す
+    """
+
+    all_messages = (
+        st.session_state.get("chat_messages", [])
+        or []
+    )
+
+    # ------------------------------------------------------------
+    # まず直近の最大メッセージ数に制限する
+    # ------------------------------------------------------------
+    recent_messages = all_messages[
+        -PROMPT_HISTORY_MAX_MESSAGES:
+    ]
+
+    selected_reversed: List[str] = []
+    used_chars = 0
+    truncated = len(all_messages) > len(recent_messages)
+
+    # ------------------------------------------------------------
+    # 新しい履歴から文字数上限内へ収める
+    # ------------------------------------------------------------
+    for message in reversed(recent_messages):
+        if not isinstance(message, dict):
+            continue
+
+        role = str(message.get("role") or "").strip()
+        content = str(message.get("content") or "").strip()
+
         if not content:
             continue
-        if role == "user":
-            lines.append(f"ユーザー: {content}")
-        elif role == "assistant":
-            lines.append(f"アシスタント: {content}")
-        else:
-            lines.append(f"{role}: {content}")
 
-    history_block = "\n".join(lines).strip()
+        label = _history_role_label(role)
+        block = f"{label}: {content}"
+        additional_chars = len(block)
 
+        if selected_reversed:
+            additional_chars += 1
+
+        # --------------------------------------------------------
+        # そのまま追加できる場合
+        # --------------------------------------------------------
+        if (
+            used_chars + additional_chars
+            <= PROMPT_HISTORY_MAX_CHARS
+        ):
+            selected_reversed.append(block)
+            used_chars += additional_chars
+            continue
+
+        truncated = True
+
+        # --------------------------------------------------------
+        # まだ1件も入っていない場合は，
+        # 最新メッセージの末尾だけを残す
+        # --------------------------------------------------------
+        if not selected_reversed:
+            prefix = f"{label}: …（前半省略）"
+            available_chars = max(
+                0,
+                PROMPT_HISTORY_MAX_CHARS - len(prefix),
+            )
+
+            if available_chars > 0:
+                shortened_content = content[-available_chars:]
+                shortened_block = (
+                    prefix
+                    + shortened_content
+                )
+
+                selected_reversed.append(shortened_block)
+                used_chars = len(shortened_block)
+
+        break
+
+    selected_blocks = list(reversed(selected_reversed))
+    history_block = "\n".join(selected_blocks).strip()
+
+    return (
+        history_block,
+        len(selected_blocks),
+        len(history_block),
+        truncated,
+    )
+
+
+def _build_prompt_from_history(
+    latest_user_text: str,
+) -> str:
+    """
+    AIへ送信するプロンプトを作成する．
+
+    方針：
+    - 文書コンテキストを含める
+    - 会話履歴は直近10往復・最大30,000文字に制限する
+    - 今回の質問・指示は履歴とは別に1回だけ追加する
+    """
+
+    doc_text = _get_doc_context_text()
+
+    (
+        history_block,
+        history_message_count,
+        history_char_count,
+        history_truncated,
+    ) = _build_limited_history_block()
+
+    # ------------------------------------------------------------
+    # デバッグ・確認用
+    # ------------------------------------------------------------
+    st.session_state[
+        "chat_last_history_message_count"
+    ] = history_message_count
+
+    st.session_state[
+        "chat_last_history_char_count"
+    ] = history_char_count
+
+    st.session_state[
+        "chat_last_history_truncated"
+    ] = history_truncated
+
+    # ------------------------------------------------------------
+    # プロンプト組み立て
+    # ------------------------------------------------------------
     parts: List[str] = []
+
     if doc_text:
         parts.append(doc_text)
+
     if history_block:
-        parts.append("【これまでの会話】\n" + history_block)
-    parts.append("【今回のユーザー発話】\n" + latest_user_text)
-    parts.append("【指示】\n丁寧な日本語で回答してください。必要なら確認質問を最小限にしてください。")
+        history_title = "【これまでの会話】"
+
+        if history_truncated:
+            history_title += (
+                "\n"
+                "※古い履歴は送信上限により省略しています．"
+            )
+
+        parts.append(
+            history_title
+            + "\n"
+            + history_block
+        )
+
+    parts.append(
+        "【今回の質問・指示】\n"
+        + latest_user_text
+    )
+
+    parts.append(
+        "【指示】\n"
+        "丁寧な日本語で回答してください．"
+        "必要なら確認質問を最小限にしてください．"
+    )
 
     return "\n\n".join(parts).strip()
+
 
 
 # ============================================================
@@ -380,7 +564,7 @@ with st.sidebar:
     st.divider()
 
 
-    if st.button("会話をリセット", key="btn_reset_chat"):
+    if st.button("会話履歴をクリア", key="btn_reset_chat"):
         st.session_state.pop("chat_messages", None)
         st.session_state.pop("chat_draft_key", None)
         st.session_state.pop("chat_last_run_id", None)
@@ -409,6 +593,24 @@ with st.sidebar:
     st.divider()
     st.subheader("履歴（保存/復元）")
 
+    # ------------------------------------------------------------
+    # ダウンロードファイル名
+    # - 拡張子は入力させず，JSON / TXT 側で自動付与する
+    # - 未入力の場合は従来どおり chat_history を使用する
+    # ------------------------------------------------------------
+    history_file_name = st.text_input(
+        "保存ファイル名",
+        value="",
+        placeholder="chat_history",
+        key="history_file_name",
+        help="拡張子は不要です。未入力の場合は chat_history になります。",
+    )
+
+    history_file_name = history_file_name.strip()
+
+    if not history_file_name:
+        history_file_name = "chat_history"
+
     messages = st.session_state.get("chat_messages", []) or []
 
     payload = _history_payload_v1(messages=messages)
@@ -418,7 +620,7 @@ with st.sidebar:
     st.download_button(
         "⬇️ 履歴をJSONでダウンロード",
         data=json_str.encode("utf-8"),
-        file_name="chat_history.json",
+        file_name=f"{history_file_name}.json",
         mime="application/json",
         disabled=(len(messages) == 0),
         key="dl_history_json",
@@ -427,7 +629,7 @@ with st.sidebar:
     st.download_button(
         "⬇️ 履歴をテキストでダウンロード",
         data=txt_str.encode("utf-8"),
-        file_name="chat_history.txt",
+        file_name=f"{history_file_name}.txt",
         mime="text/plain",
         disabled=(len(messages) == 0),
         key="dl_history_txt",
@@ -561,19 +763,39 @@ st.divider()
 # ============================================================
 # 2) Chat UI
 # ============================================================
-st.subheader("2️⃣ チャット")
+st.subheader("2️⃣ AIとの会話")
 
 # 履歴表示
 for m in st.session_state.chat_messages:
     with st.chat_message(m.get("role", "assistant")):
         st.write(m.get("content", ""))
 
+# ------------------------------------------------------------
+# 質問・指示入力欄
+# - 初回は「質問・指示」
+# - 会話開始後は「追加の質問・指示」
+# ------------------------------------------------------------
+has_chat_history = len(st.session_state.chat_messages) > 0
+
+input_label = (
+    "追加の質問・指示"
+    if has_chat_history
+    else "質問・指示"
+)
+
+input_placeholder = (
+    "続けて質問や指示を入力し，「送信」を押してください（Shift+Enterで改行）．"
+    if has_chat_history
+    else "質問や指示を入力し，「送信」を押してください（Shift+Enterで改行）．"
+)
+
 draft_key = f"chat_draft_{st.session_state.chat_draft_key}"
+
 user_text = st.text_area(
-    "メッセージ",
+    input_label,
     key=draft_key,
-    height=90,
-    placeholder="ここに入力して「送信」を押してください（Shift+Enterで改行）。",
+    height=70,
+    placeholder=input_placeholder,
 )
 
 col_send, col_hint = st.columns([1, 4])
@@ -583,7 +805,39 @@ with col_hint:
     st.caption("※ 文書コンテキストをセットしている場合、会話の前提として毎ターン参照されます。")
 
 if debug_mode:
-    st.caption("デバッグはこの下に出ます（送信後の結果など）。")
+    history_message_count = int(
+        st.session_state.get(
+            "chat_last_history_message_count",
+            0,
+        )
+        or 0
+    )
+
+    history_char_count = int(
+        st.session_state.get(
+            "chat_last_history_char_count",
+            0,
+        )
+        or 0
+    )
+
+    history_truncated = bool(
+        st.session_state.get(
+            "chat_last_history_truncated",
+            False,
+        )
+    )
+
+    st.caption(
+        "AI送信用履歴："
+        f"{history_message_count}件 / "
+        f"{history_char_count:,}文字"
+        + (
+            " / 古い履歴を省略"
+            if history_truncated
+            else " / 省略なし"
+        )
+    )
 
 
 # ============================================================
@@ -620,21 +874,45 @@ if last_sys.strip() or last_prm.strip():
 
 if send:
     if not (user_text or "").strip():
-        st.warning("メッセージが空です。")
+        st.warning("質問・指示が空です。")
         st.stop()
 
     user_text = user_text.strip()
 
-    # 表示用履歴に追加
-    st.session_state.chat_messages.append({"role": "user", "content": user_text})
+    # ------------------------------------------------------------
+    # prompt/system
+    # - 今回の発話を履歴へ追加する前にプロンプトを作る
+    # - これにより今回の発話の二重送信を防ぐ
+    # ------------------------------------------------------------
+    prompt = _build_prompt_from_history(
+        user_text,
+    )
+
+    has_doc = bool(
+        _get_doc_context_text().strip()
+    )
+
+    system = _build_system_instructions(
+        has_doc,
+    )
+
+    # ------------------------------------------------------------
+    # 画面表示・保存用の全履歴へ追加
+    # ------------------------------------------------------------
+    st.session_state.chat_messages.append(
+        {
+            "role": "user",
+            "content": user_text,
+        }
+    )
 
     # 入力欄クリア用
-    next_draft_key_value = st.session_state.chat_draft_key + 1
+    next_draft_key_value = (
+        st.session_state.chat_draft_key + 1
+    )
 
-    # prompt/system（ページ責務：組み立て）
-    prompt = _build_prompt_from_history(user_text)
-    has_doc = bool(_get_doc_context_text().strip())
-    system = _build_system_instructions(has_doc)
+
+    
 
     # ------------------------------------------------------------
     # デバッグ用：最後にAIへ送った system / prompt を保存（全文）

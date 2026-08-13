@@ -92,6 +92,9 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         body_text_color=RGBColor(45, 55, 65),
         sub_text_color=RGBColor(110, 120, 130),
         layout_key="basic",
+        content_title_font_size=30,
+        content_body_font_size=21,
+        content_narrow_body_font_size=17,
     ),
     "simple_light": SlideTheme(
         key="simple_light",
@@ -107,6 +110,9 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         body_text_color=RGBColor(55, 55, 55),
         sub_text_color=RGBColor(125, 125, 125),
         layout_key="basic",
+        content_title_font_size=30,
+        content_body_font_size=21,
+        content_narrow_body_font_size=17,
     ),
     "modern_dark": SlideTheme(
         key="modern_dark",
@@ -122,6 +128,9 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         body_text_color=RGBColor(235, 238, 242),
         sub_text_color=RGBColor(165, 172, 185),
         layout_key="basic",
+        content_title_font_size=30,
+        content_body_font_size=21,
+        content_narrow_body_font_size=17,
     ),
     "academic_green": SlideTheme(
         key="academic_green",
@@ -137,6 +146,9 @@ STANDARD_SLIDE_THEMES: dict[str, SlideTheme] = {
         body_text_color=RGBColor(45, 65, 58),
         sub_text_color=RGBColor(105, 125, 118),
         layout_key="basic",
+        content_title_font_size=30,
+        content_body_font_size=21,
+        content_narrow_body_font_size=17,
     ),
 }
 
@@ -298,6 +310,14 @@ SUBSECTION_STYLES: dict[str, SelectionOption] = {
 # 本文ページ
 # ============================================================
 CONTENT_STYLES: dict[str, SelectionOption] = {
+    "default": SelectionOption(
+        key="default",
+        label="標準",
+        description=(
+            "layoutとleft・right等の領域指定を使用する"
+            "本文ページの標準スタイルです．"
+        ),
+    ),
     "bullet": SelectionOption(
         key="bullet",
         label="箇条書き",

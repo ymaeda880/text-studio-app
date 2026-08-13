@@ -876,6 +876,45 @@ def extract_table_definition(
     )
 
     # ------------------------------------------------------------
+    # font_size
+    # ------------------------------------------------------------
+    font_size: int | None = None
+
+    raw_font_size = str(
+        attributes.get(
+            "font_size",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if raw_font_size:
+        try:
+            parsed_font_size = int(
+                raw_font_size
+            )
+
+        except ValueError:
+            errors.append(
+                f"フレーム{frame_number}："
+                "tableのfont_sizeは"
+                "整数で指定してください："
+                f"{raw_font_size}"
+            )
+
+        else:
+            if parsed_font_size <= 0:
+                errors.append(
+                    f"フレーム{frame_number}："
+                    "tableのfont_sizeは"
+                    "1以上で指定してください："
+                    f"{raw_font_size}"
+                )
+
+            else:
+                font_size = parsed_font_size
+
+    # ------------------------------------------------------------
     # caption・表本文
     # ------------------------------------------------------------
     caption, table_data_text = _extract_caption(
@@ -901,6 +940,7 @@ def extract_table_definition(
 
     return TableDefinition(
         style_key=style_key,
+        font_size=font_size,
         caption=caption,
         header=header,
         rows=rows,

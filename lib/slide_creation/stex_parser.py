@@ -25,8 +25,13 @@ import re
 from dataclasses import dataclass, field
 
 from lib.slide_creation.models import (
+    ContentDefinition,
     PresentationSettings,
+    RegionDefinition,
     SlideDefinition,
+)
+from lib.slide_creation.content_layouts.registry import (
+    CONTENT_LAYOUT_REGIONS,
 )
 
 from lib.slide_creation.table.parser import (
@@ -81,7 +86,7 @@ _FRAME_PATTERN = re.compile(
 )
 
 _ITEMIZE_PATTERN = re.compile(
-    r"\\begin\s*\{\s*itemize\s*\}"
+    r"\\begin\s*\{\s*itemize\b.*?\}"
     r"(?P<body>.*?)"
     r"\\end\s*\{\s*itemize\s*\}",
     re.DOTALL,
@@ -177,6 +182,76 @@ def _parse_key_value_block(
 
 
 # ============================================================
+# 本文レイアウト比率解析
+# ============================================================
+def _parse_layout_ratio(
+    raw_value: str,
+    *,
+    layout_key: str,
+    frame_number: int,
+    errors: list[str],
+) -> tuple[float, ...]:
+    ratio_text = str(raw_value or "").strip()
+    if not ratio_text:
+        return ()
+    expected_counts = {
+        "full": 1,
+        "two_column": 2,
+        "three_column": 3,
+        "two_row": 2,
+        "sidebar": 2,
+    }
+    expected_count = expected_counts.get(layout_key)
+    parts = [part.strip() for part in ratio_text.split(":")]
+    if expected_count is None or len(parts) != expected_count:
+        errors.append(
+            f"フレーム{frame_number}：layout={layout_key}のratioは，"
+            f"{expected_count or 0}個の正の数を「:」で区切って指定してください．"
+        )
+        return ()
+    values: list[float] = []
+    for part in parts:
+        try:
+            value = float(part)
+        except ValueError:
+            errors.append(f"フレーム{frame_number}：ratioは数値で指定してください：{ratio_text}")
+            return ()
+        if value <= 0:
+            errors.append(f"フレーム{frame_number}：ratioは0より大きい数で指定してください：{ratio_text}")
+            return ()
+        values.append(value)
+    return tuple(values)
+
+# ============================================================
+# フォント属性解析
+# ============================================================
+def _parse_optional_positive_int(
+    raw_value: str,
+    *,
+    attribute_name: str,
+    frame_number: int,
+    errors: list[str],
+) -> int | None:
+    value_text = str(raw_value or "").strip()
+    if not value_text:
+        return None
+    try:
+        value = int(value_text)
+    except ValueError:
+        errors.append(
+            f"フレーム{frame_number}：{attribute_name}は"
+            f"正の整数で指定してください：{value_text}"
+        )
+        return None
+    if value <= 0:
+        errors.append(
+            f"フレーム{frame_number}：{attribute_name}は"
+            "0より大きい整数で指定してください．"
+        )
+        return None
+    return value
+
+# ============================================================
 # 単一コマンド取得
 # ============================================================
 def _extract_command_value(
@@ -198,8 +273,75 @@ def _extract_command_value(
 
 
 # ============================================================
-# itemize取得
+# Region内コンテンツ解析
 # ============================================================
+_TEXT_ENVIRONMENT_NAMES = {
+    "text",
+    "itemize",
+    "image",
+    "imagecaption",
+    "description",
+    "note",
+}
+
+
+@dataclass(frozen=True)
+class _EnvironmentMatch:
+    name: str
+    attributes: str
+    body: str
+    start: int
+    end: int
+
+
+def _find_matching_brace(
+    text: str,
+    *,
+    opening_index: int,
+) -> int | None:
+    if (
+        opening_index < 0
+        or opening_index >= len(text)
+        or text[opening_index] != "{"
+    ):
+        return None
+
+    depth = 0
+    escaped = False
+
+    for index in range(opening_index, len(text)):
+        char = text[index]
+
+        if escaped:
+            escaped = False
+            continue
+
+        if char == "\\":
+            escaped = True
+            continue
+
+        if char == "{":
+            depth += 1
+            continue
+
+        if char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+            if depth < 0:
+                return None
+
+    return None
+
+
+def _normalize_content_text(value: str) -> str:
+    return "\n".join(
+        line.strip()
+        for line in str(value or "").splitlines()
+        if line.strip()
+    )
+
+
 def _extract_items(text: str) -> list[str]:
     item_matches = re.findall(
         r"\\item\s+(.*?)(?=\\item|\Z)",
@@ -215,48 +357,444 @@ def _extract_items(text: str) -> list[str]:
             for line in item.splitlines()
             if line.strip()
         )
-
         if cleaned:
             items.append(cleaned)
 
     return items
 
 
-def _extract_itemize_lines(
-    frame_body: str,
-) -> list[str]:
-    match = _ITEMIZE_PATTERN.search(frame_body)
+def _find_named_environments(text: str) -> list[_EnvironmentMatch]:
+    source = str(text or "")
+    begin_pattern = re.compile(
+        r"\\begin\s*\{\s*"
+        r"(?P<name>text|itemize|image|imagecaption|description|note|table)\b",
+        re.IGNORECASE,
+    )
+    matches: list[_EnvironmentMatch] = []
+    search_position = 0
 
-    if not match:
-        return []
+    while True:
+        begin_match = begin_pattern.search(source, search_position)
+        if begin_match is None:
+            break
 
-    return _extract_items(match.group("body"))
+        name = begin_match.group("name").lower()
+        opening_index = source.find("{", begin_match.start())
+        closing_index = _find_matching_brace(
+            source,
+            opening_index=opening_index,
+        )
+        if closing_index is None:
+            break
 
+        begin_inner = source[opening_index + 1:closing_index]
+        name_match = re.match(
+            rf"\s*{re.escape(name)}\b",
+            begin_inner,
+            flags=re.IGNORECASE,
+        )
+        if name_match is None:
+            search_position = begin_match.end()
+            continue
+
+        attributes = begin_inner[name_match.end():].strip()
+        if attributes.startswith(","):
+            attributes = attributes[1:].strip()
+
+        end_pattern = re.compile(
+            rf"\\end\s*\{{\s*{re.escape(name)}\s*\}}",
+            re.IGNORECASE,
+        )
+        end_match = end_pattern.search(source, closing_index + 1)
+        if end_match is None:
+            break
+
+        matches.append(
+            _EnvironmentMatch(
+                name=name,
+                attributes=attributes,
+                body=source[closing_index + 1:end_match.start()],
+                start=begin_match.start(),
+                end=end_match.end(),
+            )
+        )
+        search_position = end_match.end()
+
+    return matches
+
+
+def _find_legacy_commands(text: str) -> list[_EnvironmentMatch]:
+    pattern = re.compile(
+        r"\\(?P<name>image|imagecaption|description|note)\s*\{",
+        re.IGNORECASE,
+    )
+    source = str(text or "")
+    matches: list[_EnvironmentMatch] = []
+
+    for match in pattern.finditer(source):
+        opening_index = source.find("{", match.start())
+        closing_index = _find_matching_brace(
+            source,
+            opening_index=opening_index,
+        )
+        if closing_index is None:
+            continue
+
+        matches.append(
+            _EnvironmentMatch(
+                name=match.group("name").lower(),
+                attributes="",
+                body=source[opening_index + 1:closing_index],
+                start=match.start(),
+                end=closing_index + 1,
+            )
+        )
+
+    return matches
+
+
+def _parse_content_font_attributes(
+    attributes_text: str,
+    *,
+    content_name: str,
+    frame_number: int,
+    errors: list[str],
+) -> tuple[str, int | None]:
+    attributes = _parse_key_value_block(attributes_text)
+    allowed_attributes = {"font_name", "font_size"}
+
+    for attribute_name in attributes:
+        if attribute_name not in allowed_attributes:
+            errors.append(
+                f"フレーム{frame_number}：{content_name}では"
+                f"{attribute_name}属性を使用できません．"
+            )
+
+    font_size = _parse_optional_positive_int(
+        attributes.get("font_size", ""),
+        attribute_name=f"{content_name}のfont_size",
+        frame_number=frame_number,
+        errors=errors,
+    )
+    return (
+        attributes.get("font_name", "").strip(),
+        font_size,
+    )
 
 # ============================================================
-# left・right取得
+# Region内コンテンツ生成
 # ============================================================
+def _content_from_match(
+    match: _EnvironmentMatch,
+    *,
+    frame_number: int,
+    errors: list[str],
+    warnings: list[str],
+) -> ContentDefinition | None:
+    # --------------------------------------------------------
+    # table
+    #
+    # tableは，
+    # style・header・font_sizeなどの専用属性を持つため，
+    # 共通フォント属性解析を通さず，
+    # table.parserへ解析を委譲する．
+    # --------------------------------------------------------
+    if match.name == "table":
+        table_source = (
+            "\\begin{table,"
+            + match.attributes
+            + "}\n"
+            + match.body
+            + "\n\\end{table}"
+            if match.attributes
+            else (
+                "\\begin{table}\n"
+                + match.body
+                + "\n\\end{table}"
+            )
+        )
+
+        table = extract_table_definition(
+            table_source,
+            frame_number=frame_number,
+            errors=errors,
+            warnings=warnings,
+        )
+
+        if table is None:
+            return None
+
+        errors.extend(
+            validate_table_definition(
+                table,
+                frame_number=frame_number,
+            )
+        )
+
+        return ContentDefinition(
+            content_type="table",
+            table=table,
+        )
+
+    # --------------------------------------------------------
+    # table以外の共通フォント属性
+    #
+    # text・itemize・image・imagecaption・description・noteは，
+    # font_name・font_sizeを共通属性として扱う．
+    # --------------------------------------------------------
+    font_name, font_size = _parse_content_font_attributes(
+        match.attributes,
+        content_name=match.name,
+        frame_number=frame_number,
+        errors=errors,
+    )
+
+    # --------------------------------------------------------
+    # itemize
+    # --------------------------------------------------------
+    if match.name == "itemize":
+        items = _extract_items(
+            match.body,
+        )
+
+        if not items:
+            warnings.append(
+                f"フレーム{frame_number}："
+                "itemizeに\\itemがありません．"
+            )
+
+        return ContentDefinition(
+            content_type="itemize",
+            text="\n".join(
+                items,
+            ),
+            font_name=font_name,
+            font_size=font_size,
+        )
+
+    # --------------------------------------------------------
+    # 本文整形
+    # --------------------------------------------------------
+    normalized_text = _normalize_content_text(
+        match.body,
+    )
+
+    if not normalized_text:
+        warnings.append(
+            f"フレーム{frame_number}："
+            f"{match.name}の内容が空です．"
+        )
+
+    # --------------------------------------------------------
+    # image
+    # --------------------------------------------------------
+    if match.name == "image":
+        return ContentDefinition(
+            content_type="image",
+            image_file=normalized_text,
+            font_name=font_name,
+            font_size=font_size,
+        )
+
+    # --------------------------------------------------------
+    # text・imagecaption・description・note
+    # --------------------------------------------------------
+    return ContentDefinition(
+        content_type=match.name,
+        text=normalized_text,
+        font_name=font_name,
+        font_size=font_size,
+    )
+
+def _append_plain_text_content(
+    contents: list[tuple[int, ContentDefinition]],
+    *,
+    text: str,
+    start: int,
+) -> None:
+    normalized = _normalize_content_text(text)
+    if normalized:
+        contents.append(
+            (
+                start,
+                ContentDefinition(
+                    content_type="text",
+                    text=normalized,
+                ),
+            )
+        )
+
+
+def _parse_region_contents(
+    region_body: str,
+    *,
+    region_name: str,
+    frame_number: int,
+    errors: list[str],
+    warnings: list[str],
+) -> list[ContentDefinition]:
+    source = str(region_body or "")
+    environment_matches = _find_named_environments(source)
+    occupied_ranges = [
+        (match.start, match.end)
+        for match in environment_matches
+    ]
+
+    legacy_matches = [
+        match
+        for match in _find_legacy_commands(source)
+        if not any(
+            start <= match.start < end
+            for start, end in occupied_ranges
+        )
+    ]
+
+    all_matches = sorted(
+        environment_matches + legacy_matches,
+        key=lambda value: value.start,
+    )
+
+    parsed_contents: list[tuple[int, ContentDefinition]] = []
+    cursor = 0
+
+    for match in all_matches:
+        if match.start < cursor:
+            continue
+
+        _append_plain_text_content(
+            parsed_contents,
+            text=source[cursor:match.start],
+            start=cursor,
+        )
+
+        error_count_before = len(errors)
+        content = _content_from_match(
+            match,
+            frame_number=frame_number,
+            errors=errors,
+            warnings=warnings,
+        )
+        if len(errors) == error_count_before and content is not None:
+            parsed_contents.append((match.start, content))
+
+        cursor = match.end
+
+    _append_plain_text_content(
+        parsed_contents,
+        text=source[cursor:],
+        start=cursor,
+    )
+
+    return [
+        content
+        for _position, content in sorted(
+            parsed_contents,
+            key=lambda value: value[0],
+        )
+    ]
+
+
+def _extract_itemize_lines(frame_body: str) -> list[str]:
+    for match in _find_named_environments(frame_body):
+        if match.name == "itemize":
+            return _extract_items(match.body)
+    return []
+
+
 def _extract_environment_items(
     frame_body: str,
     environment_name: str,
 ) -> list[str]:
     pattern = re.compile(
-        rf"\\begin\s*\{{\s*"
-        rf"{re.escape(environment_name)}"
-        rf"\s*\}}"
+        rf"\\begin\s*\{{\s*{re.escape(environment_name)}\s*\}}"
         rf"(?P<body>.*?)"
-        rf"\\end\s*\{{\s*"
-        rf"{re.escape(environment_name)}"
-        rf"\s*\}}",
+        rf"\\end\s*\{{\s*{re.escape(environment_name)}\s*\}}",
         re.DOTALL,
     )
-
     match = pattern.search(frame_body)
+    return _extract_items(match.group("body")) if match else []
 
-    if not match:
-        return []
 
-    return _extract_items(match.group("body"))
+# ============================================================
+# Region環境取得・解析
+# ============================================================
+def _parse_regions(
+    frame_body: str,
+    *,
+    layout_key: str,
+    frame_number: int,
+    errors: list[str],
+    warnings: list[str],
+) -> list[RegionDefinition]:
+    allowed_names = CONTENT_LAYOUT_REGIONS[layout_key]
+    all_region_names = {
+        name
+        for names in CONTENT_LAYOUT_REGIONS.values()
+        for name in names
+    }
+    regions: list[RegionDefinition] = []
+
+    for region_name in sorted(all_region_names):
+        pattern = re.compile(
+            rf"\\begin\s*\{{\s*{re.escape(region_name)}\s*"
+            rf"(?P<attributes>,.*?)?\}}"
+            rf"(?P<body>.*?)"
+            rf"\\end\s*\{{\s*{re.escape(region_name)}\s*\}}",
+            re.DOTALL,
+        )
+        matches = list(pattern.finditer(frame_body))
+
+        if len(matches) > 1:
+            errors.append(
+                f"フレーム{frame_number}：{region_name}領域が重複しています．"
+            )
+            continue
+        if not matches:
+            continue
+
+        match = matches[0]
+        if region_name not in allowed_names:
+            errors.append(
+                f"フレーム{frame_number}：layout={layout_key}では"
+                f"{region_name}領域を使用できません．使用可能："
+                + "，".join(allowed_names)
+            )
+            continue
+
+        raw_attributes = str(match.group("attributes") or "").lstrip(",")
+        region_attributes = _parse_key_value_block(raw_attributes)
+        error_count_before = len(errors)
+        region_font_size = _parse_optional_positive_int(
+            region_attributes.get("font_size", ""),
+            attribute_name=f"{region_name}領域のfont_size",
+            frame_number=frame_number,
+            errors=errors,
+        )
+        if len(errors) > error_count_before:
+            continue
+
+        regions.append(
+            RegionDefinition(
+                name=region_name,
+                font_name=region_attributes.get("font_name", "").strip(),
+                font_size=region_font_size,
+                contents=_parse_region_contents(
+                    match.group("body"),
+                    region_name=region_name,
+                    frame_number=frame_number,
+                    errors=errors,
+                    warnings=warnings,
+                ),
+            )
+        )
+
+    if not regions:
+        errors.append(
+            f"フレーム{frame_number}：layout={layout_key}ですが，領域がありません．"
+            "使用可能：" + "，".join(allowed_names)
+        )
+
+    return regions
 
 
 # ============================================================
@@ -276,7 +814,11 @@ def _extract_plain_body(
 
     text = _ITEMIZE_PATTERN.sub("", text)
 
-    for environment_name in ("left", "right"):
+    for environment_name in (
+        "left", "center", "right",
+        "top", "bottom", "full",
+        "sidebar", "main",
+    ):
         text = re.sub(
             rf"\\begin\s*\{{\s*"
             rf"{environment_name}"
@@ -408,6 +950,24 @@ def _parse_frame(
 
     slide_type = attributes.get("type", "").strip()
     style_key = attributes.get("style", "").strip()
+    layout_key = attributes.get("layout", "").strip()
+    ratio_text = attributes.get("ratio", "").strip()
+    frame_font_name = attributes.get("font_name", "").strip()
+    error_count_before_fonts = len(errors)
+    title_font_size = _parse_optional_positive_int(
+        attributes.get("title_font_size", ""),
+        attribute_name="title_font_size",
+        frame_number=frame_number,
+        errors=errors,
+    )
+    body_font_size = _parse_optional_positive_int(
+        attributes.get("body_font_size", ""),
+        attribute_name="body_font_size",
+        frame_number=frame_number,
+        errors=errors,
+    )
+    if len(errors) > error_count_before_fonts:
+        return None
 
     if not slide_type:
         errors.append(
@@ -423,8 +983,48 @@ def _parse_frame(
         )
         return None
 
+    if layout_key:
+        if slide_type != "content":
+            errors.append(
+                f"フレーム{frame_number}："
+                "layoutはtype=contentで指定してください．"
+            )
+            return None
+
+        if layout_key not in CONTENT_LAYOUT_REGIONS:
+            errors.append(
+                f"フレーム{frame_number}："
+                f"未登録のlayoutです：{layout_key}．"
+                "使用可能："
+                + "，".join(sorted(CONTENT_LAYOUT_REGIONS))
+            )
+            return None
+
+    if ratio_text and not layout_key:
+        errors.append(
+            f"フレーム{frame_number}：ratioを指定する場合はlayoutも指定してください．"
+        )
+        return None
+
+    layout_ratio = (
+        _parse_layout_ratio(
+            ratio_text,
+            layout_key=layout_key,
+            frame_number=frame_number,
+            errors=errors,
+        )
+        if layout_key
+        else ()
+    )
+    if ratio_text and not layout_ratio:
+        return None
+
     if not style_key:
-        style_key = get_default_style_key(slide_type)
+        style_key = (
+            "default"
+            if layout_key
+            else get_default_style_key(slide_type)
+        )
 
         warnings.append(
             f"フレーム{frame_number}："
@@ -445,161 +1045,122 @@ def _parse_frame(
         )
         return None
 
-    title = _extract_command_value(
-        frame_body,
-        "title",
-    )
-    subtitle = _extract_command_value(
-        frame_body,
-        "subtitle",
-    )
-    section_number = _extract_command_value(
-        frame_body,
-        "sectionnumber",
-    )
-    presenter_name = _extract_command_value(
-        frame_body,
-        "presenter",
-    )
-    contact_text = _extract_command_value(
-        frame_body,
-        "contact",
-    )
-    message = _extract_command_value(
-        frame_body,
-        "message",
-    )
-
-
-    left_heading = _extract_command_value(
-        frame_body,
-        "lefttitle",
-    )
-    right_heading = _extract_command_value(
-        frame_body,
-        "righttitle",
-    )
-
-    image_file = _extract_command_value(
-        frame_body,
-        "image",
-    )
-
-    image_caption = _extract_command_value(
-        frame_body,
-        "imagecaption",
-    )
-
-    description = _extract_command_value(
-        frame_body,
-        "description",
-    )
-
-    note = _extract_command_value(
-        frame_body,
-        "note",
-    )
-
-    itemize_lines = _extract_itemize_lines(
-        frame_body
-    )
-
-    left_lines = _extract_environment_items(
-        frame_body,
-        "left",
-    )
-    right_lines = _extract_environment_items(
-        frame_body,
-        "right",
-    )
+    title = _extract_command_value(frame_body, "title")
+    subtitle = _extract_command_value(frame_body, "subtitle")
+    section_number = _extract_command_value(frame_body, "sectionnumber")
+    presenter_name = _extract_command_value(frame_body, "presenter")
+    contact_text = _extract_command_value(frame_body, "contact")
+    message = _extract_command_value(frame_body, "message")
+    left_heading = _extract_command_value(frame_body, "lefttitle")
+    right_heading = _extract_command_value(frame_body, "righttitle")
 
     # --------------------------------------------------------
-    # 表取得
+    # 新しいlayout・Region構文
     # --------------------------------------------------------
-    table = extract_table_definition(
-        frame_body,
-        frame_number=frame_number,
-        errors=errors,
-        warnings=warnings,
-    )
+    if layout_key:
+        error_count_before_regions = len(errors)
 
-    if table is not None:
-        table_errors = validate_table_definition(
-            table,
+        regions = _parse_regions(
+            frame_body,
+            layout_key=layout_key,
             frame_number=frame_number,
+            errors=errors,
+            warnings=warnings,
         )
 
-        errors.extend(
-            table_errors,
-        )
+        if len(errors) > error_count_before_regions:
+            return None
 
-    if style_key in {"two_column", "comparison"}:
-        body_lines: list[str] = []
+        body = ""
+        image_file = ""
+        image_caption = ""
+        description = ""
+        note = ""
+        table = None
 
-        body_lines.extend(left_lines)
-        body_lines.extend(right_lines)
-
-        if not body_lines:
-            body_lines = itemize_lines
-
-        body = "\n".join(body_lines)
-
-    elif itemize_lines:
-        body = "\n".join(itemize_lines)
-
-    elif message:
-        body = message
-
+    # --------------------------------------------------------
+    # 従来構文
+    # --------------------------------------------------------
     else:
-        body = _extract_plain_body(frame_body)
+        image_file = _extract_command_value(frame_body, "image")
+        image_caption = _extract_command_value(frame_body, "imagecaption")
+        description = _extract_command_value(frame_body, "description")
+        note = _extract_command_value(frame_body, "note")
 
-    # --------------------------------------------------------
-    # 画像付き本文ページの確認
-    # --------------------------------------------------------
-    if (
-        slide_type == "content"
-        and style_key == "text_image"
-        and not image_file
-    ):
-        errors.append(
-            f"フレーム{frame_number}："
-            "style=text_imageでは"
-            "\\image{...}を指定してください．"
-        )
-        return None
+        itemize_lines = _extract_itemize_lines(frame_body)
+        left_lines = _extract_environment_items(frame_body, "left")
+        right_lines = _extract_environment_items(frame_body, "right")
 
-    # --------------------------------------------------------
-    # 表スライドの確認
-    # --------------------------------------------------------
-    if (
-        slide_type == "content"
-        and style_key in {
-            "table",
-            "text_table",
-        }
-        and table is None
-    ):
-        errors.append(
-            f"フレーム{frame_number}："
-            f"style={style_key}では"
-            "\\begin{table,...}から"
-            "\\end{table}までを指定してください．"
+        table = extract_table_definition(
+            frame_body,
+            frame_number=frame_number,
+            errors=errors,
+            warnings=warnings,
         )
-        return None
 
-    if (
-        table is not None
-        and slide_type != "content"
-    ):
-        errors.append(
-            f"フレーム{frame_number}："
-            "tableはtype=contentの"
-            "フレーム内で使用してください．"
-        )
-        return None
-    
+        if table is not None:
+            errors.extend(
+                validate_table_definition(
+                    table,
+                    frame_number=frame_number,
+                )
+            )
+
+        if style_key in {"two_column", "comparison"}:
+            body_lines: list[str] = []
+            body_lines.extend(left_lines)
+            body_lines.extend(right_lines)
+
+            if not body_lines:
+                body_lines = itemize_lines
+
+            body = "\n".join(body_lines)
+
+        elif itemize_lines:
+            body = "\n".join(itemize_lines)
+
+        elif message:
+            body = message
+
+        else:
+            body = _extract_plain_body(frame_body)
+
+        regions = []
+
+        if (
+            slide_type == "content"
+            and style_key == "text_image"
+            and not image_file
+        ):
+            errors.append(
+                f"フレーム{frame_number}："
+                "style=text_imageでは"
+                "\\image{...}を指定してください．"
+            )
+            return None
+
+        if (
+            slide_type == "content"
+            and style_key in {"table", "text_table"}
+            and table is None
+        ):
+            errors.append(
+                f"フレーム{frame_number}："
+                f"style={style_key}では"
+                "\\begin{table,...}から"
+                "\\end{table}までを指定してください．"
+            )
+            return None
+
+        if table is not None and slide_type != "content":
+            errors.append(
+                f"フレーム{frame_number}："
+                "tableはtype=contentの"
+                "フレーム内で使用してください．"
+            )
+            return None
+
     if not title:
-
         warnings.append(
             f"フレーム{frame_number}："
             "\\title{...}がありません．"
@@ -616,12 +1177,19 @@ def _parse_frame(
         right_heading=right_heading,
         presenter_name=presenter_name,
         contact_text=contact_text,
+        layout_key=layout_key,
+        layout_ratio=layout_ratio,
+        font_name=frame_font_name,
+        title_font_size=title_font_size,
+        body_font_size=body_font_size,
+        regions=regions,
         description=description,
         note=note,
         image_file=image_file,
         image_caption=image_caption,
         table=table,
     )
+
 
 # ============================================================
 # 公開関数

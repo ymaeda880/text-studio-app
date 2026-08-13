@@ -31,6 +31,7 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
+from lib.slide_creation.font_settings import resolve_font_size
 from lib.slide_creation.models import (
     SlideTheme,
 )
@@ -602,6 +603,7 @@ def _set_cell_text(
     text: str,
     theme: SlideTheme,
     font_size: int,
+    font_name: str | None,
     color: Any,
     bold: bool,
     alignment: PP_ALIGN,
@@ -635,7 +637,7 @@ def _set_cell_text(
         paragraph.space_before = Pt(0)
 
         for run in paragraph.runs:
-            run.font.name = theme.font_name
+            run.font.name = font_name or theme.font_name
             run.font.size = Pt(
                 font_size,
             )
@@ -793,6 +795,8 @@ def _add_caption(
     width: float,
     height: float,
     theme: SlideTheme,
+    font_name: str | None = None,
+    font_size: int | None = None,
 ) -> None:
     # ------------------------------------------------------------
     # 左側アクセント線
@@ -830,8 +834,8 @@ def _add_caption(
     paragraph.space_after = Pt(0)
 
     for run in paragraph.runs:
-        run.font.name = theme.font_name
-        run.font.size = Pt(12)
+        run.font.name = font_name or theme.font_name
+        run.font.size = Pt(font_size or theme.table_caption_font_size)
         run.font.bold = True
         run.font.color.rgb = theme.body_text_color
 
@@ -855,6 +859,13 @@ def _set_uniform_row_heights(
         float(total_height)
         / float(row_count)
     )
+
+    # ===== DEBUG START =====
+    print("----- TABLE ROW HEIGHT -----")
+    print(f"{total_height=}")
+    print(f"{row_count=}")
+    print(f"{row_height=}")
+    # ===== DEBUG END =====
 
     for row in table.rows:
         row.height = Inches(
@@ -977,6 +988,8 @@ def render_table(
     top: float,
     width: float,
     height: float,
+    font_name: str | None = None,
+    layout_font_defaults: dict[str, Any] | None = None,
 ) -> Any:
     # ------------------------------------------------------------
     # 入力確認
@@ -1022,6 +1035,8 @@ def render_table(
             width=width,
             height=caption_height,
             theme=theme,
+            font_name=font_name,
+            font_size=resolve_font_size(role="table_caption", theme=theme, layout_defaults=layout_font_defaults),
         )
 
     table_top = (
@@ -1033,6 +1048,16 @@ def render_table(
         MIN_TABLE_HEIGHT,
         height - caption_height,
     )
+
+    # ===== DEBUG START =====
+    print("----- TABLE BOUNDS -----")
+    print(f"{top=}")
+    print(f"{height=}")
+    print(f"{caption_height=}")
+    print(f"{table_top=}")
+    print(f"{table_height=}")
+    print(f"expected_table_bottom={table_top + table_height}")
+    # ===== DEBUG END =====
 
     # ------------------------------------------------------------
     # PowerPoint表作成
@@ -1046,6 +1071,16 @@ def render_table(
         Inches(table_height),
     )
 
+    # ===== DEBUG START =====
+    print("----- TABLE SHAPE -----")
+    print(f"shape_top={table_shape.top.inches}")
+    print(f"shape_height={table_shape.height.inches}")
+    print(
+        "shape_bottom="
+        f"{table_shape.top.inches + table_shape.height.inches}"
+    )
+    # ===== DEBUG END =====
+    
     pptx_table = table_shape.table
 
     _set_uniform_column_widths(
@@ -1157,10 +1192,19 @@ def render_table(
                 text=text,
                 theme=theme,
                 font_size=(
-                    style.header_font_size
-                    if is_top_header
-                    else style.font_size
+                    table_definition.font_size
+                    if table_definition.font_size is not None
+                    else resolve_font_size(
+                        role=(
+                            "table_header"
+                            if is_top_header
+                            else "table_body"
+                        ),
+                        theme=theme,
+                        layout_defaults=layout_font_defaults,
+                    )
                 ),
+                font_name=font_name,
                 color=text_color,
                 bold=(
                     style.header_bold
@@ -1186,4 +1230,7 @@ def render_table(
         table_definition=table_definition,
     )
 
+    # --------------------------------------------------------
+    # 表の実際の下端座標を返す
+    # --------------------------------------------------------
     return table_shape

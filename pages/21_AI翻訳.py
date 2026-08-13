@@ -119,6 +119,7 @@ from lib.translate.explanation import (
 # lib（翻訳プロンプト）
 # ============================================================
 from lib.translate.prompts import (
+    TRANSLATE_TO_OTHER,
     TRANSLATION_DIRECTIONS,
     DEFAULT_TRANSLATION_DIRECTION,
     build_translation_system_prompt,
@@ -183,6 +184,7 @@ st.session_state.setdefault(K_LAST_ACCEPTED_INPUT_SIG, "")
 # ============================================================
 K_MODEL_KEY = f"{PAGE_NAME}__model_key"
 K_TRANSLATION_DIRECTION = f"{PAGE_NAME}__translation_direction"
+K_OTHER_TARGET_LANGUAGE = f"{PAGE_NAME}__other_target_language"
 K_EXTRA_PROMPT = f"{PAGE_NAME}__extra_prompt"
 
 st.session_state.setdefault(K_MODEL_KEY, DEFAULT_MODEL_KEY)
@@ -428,12 +430,22 @@ st.subheader("② 翻訳方法の設定")
 # ------------------------------------------------------------
 # 翻訳方向
 # ------------------------------------------------------------
-st.radio(
+selected_translation_direction = st.radio(
     "翻訳方向",
     options=TRANSLATION_DIRECTIONS,
     key=K_TRANSLATION_DIRECTION,
     horizontal=True,
 )
+
+# ------------------------------------------------------------
+# その他の言語
+# ------------------------------------------------------------
+if selected_translation_direction == TRANSLATE_TO_OTHER:
+    st.text_input(
+        "翻訳先の言語",
+        key=K_OTHER_TARGET_LANGUAGE,
+        placeholder="例）イタリア語，中国語，韓国語，ポルトガル語",
+    )
 
 # ------------------------------------------------------------
 # 要約設定
@@ -636,10 +648,35 @@ if run_clicked:
     # ------------------------------------------------------------
     # 翻訳方向
     # ------------------------------------------------------------
-    direction = str(
+    selected_direction = str(
         st.session_state.get(K_TRANSLATION_DIRECTION)
         or DEFAULT_TRANSLATION_DIRECTION
     )
+
+    # ------------------------------------------------------------
+    # その他の言語を実際の翻訳方向へ変換
+    # ------------------------------------------------------------
+    if selected_direction == TRANSLATE_TO_OTHER:
+
+        other_target_language = str(
+            st.session_state.get(K_OTHER_TARGET_LANGUAGE)
+            or ""
+        ).strip()
+
+        if not other_target_language:
+            st.error(
+                "「その他の言語」を選択した場合は，"
+                "翻訳先の言語を入力してください．"
+            )
+            st.stop()
+
+        if other_target_language.endswith("に翻訳"):
+            direction = other_target_language
+        else:
+            direction = f"{other_target_language}に翻訳"
+
+    else:
+        direction = selected_direction
 
     # ------------------------------------------------------------
     # usage 表示を初期化
@@ -865,12 +902,58 @@ if st.session_state.get(K_LAST_TRANSLATED_TEXT):
         str(st.session_state.get(K_LAST_USED_FILE_NAME) or "pasted_text")
     ).rsplit(".", 1)[0]
 
-    direction_label = (
-        str(st.session_state.get(K_LAST_DIRECTION) or "")
-        .replace(" ", "")
-        .replace("日本語に翻訳", "to_ja")
-        .replace("英語に翻訳", "to_en")
-    )
+    last_direction = str(
+        st.session_state.get(K_LAST_DIRECTION)
+        or ""
+    ).strip()
+
+    # ------------------------------------------------------------
+    # 翻訳先言語ごとのファイル名ラベル
+    # ------------------------------------------------------------
+    direction_file_labels = {
+        "日本語に翻訳": "to_ja",
+        "英語に翻訳": "to_en",
+        "フランス語に翻訳": "to_fr",
+        "ドイツ語に翻訳": "to_de",
+        "スペイン語に翻訳": "to_es",
+    }
+
+    direction_label = direction_file_labels.get(last_direction)
+
+    # ------------------------------------------------------------
+    # その他の言語
+    # ------------------------------------------------------------
+    if not direction_label:
+        custom_language = last_direction
+
+        if custom_language.endswith("に翻訳"):
+            custom_language = custom_language[:-4].strip()
+
+        direction_label = (
+            f"to_{custom_language}"
+            if custom_language
+            else "to_other"
+        )
+
+    # ------------------------------------------------------------
+    # ファイル名に使用できない文字を置換
+    # ------------------------------------------------------------
+    for unsafe_char in (
+        "/",
+        "\\",
+        ":",
+        "*",
+        "?",
+        '"',
+        "<",
+        ">",
+        "|",
+        " ",
+    ):
+        direction_label = direction_label.replace(
+            unsafe_char,
+            "_",
+        )
 
     file_stub = (
         f"翻訳結果_{file_base}_{direction_label}"

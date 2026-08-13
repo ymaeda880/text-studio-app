@@ -59,6 +59,7 @@ def add_textbox(
     theme: SlideTheme,
     font_size: int,
     color: Any,
+    font_name: str | None = None,
     bold: bool = False,
     alignment: PP_ALIGN = PP_ALIGN.LEFT,
     vertical_anchor: MSO_ANCHOR = MSO_ANCHOR.TOP,
@@ -80,7 +81,7 @@ def add_textbox(
     paragraph.alignment = alignment
 
     for run in paragraph.runs:
-        run.font.name = theme.font_name
+        run.font.name = font_name or theme.font_name
         run.font.size = Pt(font_size)
         run.font.bold = bold
         run.font.color.rgb = color
@@ -253,6 +254,7 @@ def add_bullet_text(
     height: float,
     theme: SlideTheme,
     font_size: int | None = None,
+    font_name: str | None = None,
 ) -> None:
     box = slide.shapes.add_textbox(
         Inches(left),
@@ -279,7 +281,7 @@ def add_bullet_text(
         paragraph.space_after = Pt(12)
 
         for run in paragraph.runs:
-            run.font.name = theme.font_name
+            run.font.name = font_name or theme.font_name
             run.font.size = Pt(font_size or theme.body_font_size)
             run.font.color.rgb = theme.body_text_color
 
@@ -294,6 +296,8 @@ def add_header(
     slide_title: str,
     header_key: str,
     theme: SlideTheme,
+    font_size: int | None = None,
+    font_name: str | None = None,
 ) -> None:
     if header_key == "title_band":
         bar = slide.shapes.add_shape(
@@ -315,7 +319,8 @@ def add_header(
             height=0.7,
             text=slide_title,
             theme=theme,
-            font_size=theme.title_font_size,
+            font_size=font_size or theme.title_font_size,
+            font_name=font_name,
             color=theme.title_text_color,
             bold=True,
             vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -330,7 +335,8 @@ def add_header(
         height=0.7,
         text=slide_title,
         theme=theme,
-        font_size=theme.title_font_size,
+        font_size=font_size or theme.title_font_size,
+        font_name=font_name,
         color=theme.body_text_color,
         bold=True,
     )

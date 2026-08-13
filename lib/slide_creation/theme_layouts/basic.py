@@ -41,14 +41,68 @@ from lib.slide_creation.components import (
     set_slide_background,
     split_body_lines,
 )
+from lib.slide_creation.font_settings import (
+    resolve_font_name,
+    resolve_font_size,
+)
 from lib.slide_creation.models import (
     PresentationSettings,
     SlideDefinition,
     SlideTheme,
 )
+from lib.slide_creation.content_layouts.renderer import (
+    render_content_regions,
+)
 from lib.slide_creation.table.renderer import (
     render_table,
 )
+
+
+# ============================================================
+# レイアウト固有フォント既定値
+# ============================================================
+FONT_DEFAULTS = {
+    "font_name": "游ゴシック",
+    "title_page_title": 36,
+    "title_page_title.full_color": 38,
+    "title_page_title.centered": 38,
+    "title_page_title.vertical_info": 38,
+    "title_page_subtitle": 18,
+    "title_page_subtitle.full_color": 20,
+    "title_page_subtitle.centered": 19,
+    "title_page_subtitle.vertical_info": 19,
+    "title_page_detail": 11,
+    "title_page_presenter": 14,
+    "section_number": 22,
+    "section_number.full_color": 26,
+    "section_number.large_number": 80,
+    "section_title": 38,
+    "section_title.full_color": 40,
+    "section_title.centered": 40,
+    "section_subtitle": 17,
+    "subsection_title": 36,
+    "subsection_title.accent_band": 34,
+    "subsection_title.card": 34,
+    "subsection_title.dark_panel": 34,
+    "subsection_subtitle": 17,
+    "subsection_subtitle.accent_band": 16,
+    "content_heading": 16,
+    "message": 30,
+    "table_description": 14,
+    "table_note": 12,
+    "image_caption": 12,
+    "ending_title": 38,
+    "ending_title.contact": 34,
+    "ending_title.summary": 32,
+    "ending_subtitle": 18,
+    "ending_contact": 20,
+}
+
+def _font_size(role: str, *, theme: SlideTheme, slide_def: SlideDefinition) -> int:
+    return resolve_font_size(role=role, theme=theme, slide_def=slide_def, layout_defaults=FONT_DEFAULTS, style_key=slide_def.style_key)
+
+def _font_name(*, theme: SlideTheme, slide_def: SlideDefinition) -> str:
+    return resolve_font_name(theme=theme, slide_def=slide_def, layout_defaults=FONT_DEFAULTS)
 
 # ============================================================
 # スライドサイズ
@@ -83,7 +137,8 @@ def render_title(
             height=1.4,
             text=slide_def.title,
             theme=theme,
-            font_size=38,
+            font_size=_font_size("title_page_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -98,7 +153,8 @@ def render_title(
             height=0.7,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=20,
+            font_size=_font_size("title_page_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -117,7 +173,8 @@ def render_title(
             height=1.4,
             text=slide_def.title,
             theme=theme,
-            font_size=38,
+            font_size=_font_size("title_page_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -132,7 +189,8 @@ def render_title(
             height=0.7,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=19,
+            font_size=_font_size("title_page_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -154,7 +212,8 @@ def render_title(
             height=1.10,
             text=slide_def.title,
             theme=theme,
-            font_size=38,
+            font_size=_font_size("title_page_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -172,7 +231,8 @@ def render_title(
             height=0.70,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=19,
+            font_size=_font_size("title_page_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
             alignment=PP_ALIGN.CENTER,
             vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -195,7 +255,8 @@ def render_title(
                 height=0.35,
                 text=settings.company_name,
                 theme=theme,
-                font_size=11,
+                font_size=_font_size("title_page_detail", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.sub_text_color,
                 alignment=PP_ALIGN.CENTER,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -213,7 +274,8 @@ def render_title(
                 height=0.42,
                 text=presenter_name,
                 theme=theme,
-                font_size=14,
+                font_size=_font_size("title_page_presenter", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.body_text_color,
                 bold=True,
                 alignment=PP_ALIGN.CENTER,
@@ -232,7 +294,8 @@ def render_title(
                 height=0.35,
                 text=settings.presentation_date,
                 theme=theme,
-                font_size=11,
+                font_size=_font_size("title_page_detail", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.sub_text_color,
                 alignment=PP_ALIGN.CENTER,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -252,7 +315,8 @@ def render_title(
             height=1.3,
             text=slide_def.title,
             theme=theme,
-            font_size=36,
+            font_size=_font_size("title_page_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
         )
@@ -265,7 +329,8 @@ def render_title(
             height=0.7,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=18,
+            font_size=_font_size("title_page_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
         )
 
@@ -294,7 +359,8 @@ def render_title(
             height=1.35,
             text=slide_def.title,
             theme=theme,
-            font_size=36,
+            font_size=_font_size("title_page_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -308,7 +374,8 @@ def render_title(
             height=0.7,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=18,
+            font_size=_font_size("title_page_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
         )
 
@@ -340,7 +407,8 @@ def render_title(
             height=0.4,
             text="　｜　".join(detail_values),
             theme=theme,
-            font_size=11,
+            font_size=_font_size("title_page_detail", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=(
                 theme.title_text_color
                 if style_key == "full_color"
@@ -375,7 +443,8 @@ def render_section(
             height=0.8,
             text=slide_def.section_number,
             theme=theme,
-            font_size=26,
+            font_size=_font_size("section_number", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.accent_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -389,7 +458,8 @@ def render_section(
             height=1.4,
             text=slide_def.title,
             theme=theme,
-            font_size=40,
+            font_size=_font_size("section_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -404,7 +474,8 @@ def render_section(
             height=0.8,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=17,
+            font_size=_font_size("section_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -424,7 +495,8 @@ def render_section(
             height=2.5,
             text=slide_def.section_number,
             theme=theme,
-            font_size=80,
+            font_size=_font_size("section_number", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.accent_color,
             bold=True,
         )
@@ -437,7 +509,8 @@ def render_section(
             height=1.2,
             text=slide_def.title,
             theme=theme,
-            font_size=38,
+            font_size=_font_size("section_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
         )
@@ -450,7 +523,8 @@ def render_section(
             height=0.8,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=17,
+            font_size=_font_size("section_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
         )
         return
@@ -464,7 +538,8 @@ def render_section(
             height=0.6,
             text=slide_def.section_number,
             theme=theme,
-            font_size=22,
+            font_size=_font_size("section_number", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.accent_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -478,7 +553,8 @@ def render_section(
             height=1.2,
             text=slide_def.title,
             theme=theme,
-            font_size=40,
+            font_size=_font_size("section_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -492,7 +568,8 @@ def render_section(
             height=0.8,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=17,
+            font_size=_font_size("section_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -517,7 +594,8 @@ def render_section(
         height=0.6,
         text=slide_def.section_number,
         theme=theme,
-        font_size=22,
+        font_size=_font_size("section_number", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.accent_color,
         bold=True,
     )
@@ -530,7 +608,8 @@ def render_section(
         height=1.2,
         text=slide_def.title,
         theme=theme,
-        font_size=38,
+        font_size=_font_size("section_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.body_text_color,
         bold=True,
     )
@@ -543,7 +622,8 @@ def render_section(
         height=0.9,
         text=slide_def.subtitle,
         theme=theme,
-        font_size=17,
+        font_size=_font_size("section_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.sub_text_color,
     )
 
@@ -584,7 +664,8 @@ def render_subsection(
             height=0.9,
             text=slide_def.title,
             theme=theme,
-            font_size=34,
+            font_size=_font_size("subsection_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -599,7 +680,8 @@ def render_subsection(
             height=0.6,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=16,
+            font_size=_font_size("subsection_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -623,7 +705,8 @@ def render_subsection(
             height=1.0,
             text=slide_def.title,
             theme=theme,
-            font_size=34,
+            font_size=_font_size("subsection_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -637,7 +720,8 @@ def render_subsection(
             height=0.8,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=17,
+            font_size=_font_size("subsection_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.sub_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -662,7 +746,8 @@ def render_subsection(
             height=1.0,
             text=slide_def.title,
             theme=theme,
-            font_size=34,
+            font_size=_font_size("subsection_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -676,7 +761,8 @@ def render_subsection(
             height=0.8,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=17,
+            font_size=_font_size("subsection_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -690,7 +776,8 @@ def render_subsection(
         height=1.0,
         text=slide_def.title,
         theme=theme,
-        font_size=36,
+        font_size=_font_size("subsection_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.body_text_color,
         bold=True,
         alignment=PP_ALIGN.CENTER,
@@ -704,7 +791,8 @@ def render_subsection(
         height=0.8,
         text=slide_def.subtitle,
         theme=theme,
-        font_size=17,
+        font_size=_font_size("subsection_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.sub_text_color,
         alignment=PP_ALIGN.CENTER,
     )
@@ -734,9 +822,33 @@ def render_content(
         slide_title=slide_def.title,
         header_key=settings.header_key,
         theme=theme,
+        font_size=_font_size("content_title", theme=theme, slide_def=slide_def),
+        font_name=_font_name(theme=theme, slide_def=slide_def),
     )
 
     lines = split_body_lines(slide_def.body)
+
+    # --------------------------------------------------------
+    # 新しいlayout・Region構文
+    # --------------------------------------------------------
+    if slide_def.layout_key:
+        render_content_regions(
+            slide,
+            slide_def=slide_def,
+            settings=settings,
+            theme=theme,
+            inbox_root=inbox_root,
+            sub=sub,
+        )
+
+        add_footer(
+            slide,
+            footer_key=settings.footer_key,
+            settings=settings,
+            page_number=page_number,
+            theme=theme,
+        )
+        return
 
     # --------------------------------------------------------
     # 表
@@ -809,7 +921,8 @@ def render_content(
                 height=description_height,
                 text=slide_def.description,
                 theme=theme,
-                font_size=14,
+                font_size=_font_size("table_description", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.body_text_color,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
             )
@@ -856,7 +969,8 @@ def render_content(
                 height=note_height,
                 text=slide_def.note,
                 theme=theme,
-                font_size=12,
+                font_size=_font_size("table_note", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.sub_text_color,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
             )
@@ -957,7 +1071,8 @@ def render_content(
                 height=description_height,
                 text=slide_def.description,
                 theme=theme,
-                font_size=12,
+                font_size=_font_size("table_description", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.body_text_color,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
             )
@@ -1004,7 +1119,8 @@ def render_content(
                 height=note_height,
                 text=slide_def.note,
                 theme=theme,
-                font_size=11,
+                font_size=_font_size("table_note", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.sub_text_color,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
             )
@@ -1081,7 +1197,8 @@ def render_content(
                 height=0.45,
                 text=slide_def.image_caption,
                 theme=theme,
-                font_size=12,
+                font_size=_font_size("image_caption", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
                 color=theme.sub_text_color,
                 alignment=PP_ALIGN.CENTER,
                 vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -1141,7 +1258,8 @@ def render_content(
             height=0.35,
             text=slide_def.left_heading or "項目A",
             theme=theme,
-            font_size=16,
+            font_size=_font_size("content_heading", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.accent_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -1155,7 +1273,8 @@ def render_content(
             height=0.35,
             text=slide_def.right_heading or "項目B",
             theme=theme,
-            font_size=16,
+            font_size=_font_size("content_heading", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.accent_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -1215,7 +1334,8 @@ def render_content(
             height=3.0,
             text=slide_def.body,
             theme=theme,
-            font_size=30,
+            font_size=_font_size("message", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -1280,7 +1400,8 @@ def render_ending(
                 or "ご清聴ありがとうございました"
             ),
             theme=theme,
-            font_size=38,
+            font_size=_font_size("ending_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -1295,7 +1416,8 @@ def render_ending(
             height=0.8,
             text=slide_def.subtitle,
             theme=theme,
-            font_size=18,
+            font_size=_font_size("ending_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.title_text_color,
             alignment=PP_ALIGN.CENTER,
         )
@@ -1315,7 +1437,8 @@ def render_ending(
             height=0.8,
             text=slide_def.title or "お問い合わせ",
             theme=theme,
-            font_size=34,
+            font_size=_font_size("ending_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
             alignment=PP_ALIGN.CENTER,
@@ -1351,7 +1474,8 @@ def render_ending(
             height=2.3,
             text="\n".join(contact_values),
             theme=theme,
-            font_size=20,
+            font_size=_font_size("ending_contact", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             alignment=PP_ALIGN.CENTER,
             vertical_anchor=MSO_ANCHOR.MIDDLE,
@@ -1367,7 +1491,8 @@ def render_ending(
             height=0.7,
             text=slide_def.title or "まとめ",
             theme=theme,
-            font_size=32,
+            font_size=_font_size("ending_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
             color=theme.body_text_color,
             bold=True,
         )
@@ -1400,7 +1525,8 @@ def render_ending(
         height=1.2,
         text=slide_def.title or "以上です",
         theme=theme,
-        font_size=38,
+        font_size=_font_size("ending_title", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.body_text_color,
         bold=True,
         alignment=PP_ALIGN.CENTER,
@@ -1415,7 +1541,8 @@ def render_ending(
         height=0.8,
         text=slide_def.subtitle,
         theme=theme,
-        font_size=18,
+        font_size=_font_size("ending_subtitle", theme=theme, slide_def=slide_def),
+            font_name=_font_name(theme=theme, slide_def=slide_def),
         color=theme.sub_text_color,
         alignment=PP_ALIGN.CENTER,
     )

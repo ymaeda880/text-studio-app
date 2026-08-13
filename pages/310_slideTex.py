@@ -259,7 +259,7 @@ if parse_result is not None:
     if parse_result.slides:
         with st.expander(
             "スライド構成",
-            expanded=True,
+            expanded=False,
         ):
             for index, slide in enumerate(
                 parse_result.slides,
