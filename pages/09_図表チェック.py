@@ -51,11 +51,15 @@ APP_NAME = _THIS.parents[1].name
 PAGE_NAME = _THIS.stem
 
 # ============================================================
-# common_lib（正本：ログイン/heartbeat + UI）
+# common_lib（正本：ログイン/heartbeat + UI + Excel）
 # ============================================================
 from common_lib.pdf_tools.text_extract.detect import detect_pdf_kind_from_bytes
 from common_lib.ui.page_header import render_standard_page_header
 from common_lib.ui.input_source import render_input_source
+from common_lib.excel.status_formats import (
+    STATUS_BLUE_BG,
+    create_status_formats,
+)
 
 # ============================================================
 # lib（説明UI）
@@ -658,12 +662,12 @@ with c1:
     )
 
 with c2:
-    st.markdown("**② 本文に参照があるが見出しが無いものはないか？**")
+    st.markdown("**② 本文に参照があるが対応する図表が無いものはないか？**")
     st.write(
         "→ **{}**".format(
-            "はい（全て見出しあり）✅"
+            "はい（全て対応図表あり）✅"
             if not has_refs_without_caption
-            else "いいえ（見出しなしの参照あり）⚠️"
+            else "いいえ（対応図表なしの参照あり）⚠️"
         )
     )
 
@@ -695,7 +699,7 @@ for k in referenced_keys:
         {
             "図表キー": k,
             "図表タイトル": ci["図表タイトル"],
-            "頁": ci["頁"],
+            "頁ラベル": ci["頁"],
             "pdf頁": ci["pdf頁"],
             "参照頁ラベル": ref_lbls.get(bk, ""),
             "参照pdf頁": ref_pdfs.get(bk, ""),
@@ -711,7 +715,7 @@ df_referenced_view = (
         columns=[
             "図表キー",
             "図表タイトル",
-            "頁",
+            "頁ラベル",
             "pdf頁",
             "参照頁ラベル",
             "参照pdf頁",
@@ -745,7 +749,7 @@ df_missing_caption_refs = pd.DataFrame(
 
 st.dataframe(df_missing_caption_refs)
 
-st.markdown("#### 🔵 見出しなしの参照（本文に参照はあるが対応する見出しが無い）")
+st.markdown("#### 🔵 対応図表なしの参照（本文に参照はあるが対応する図表が無い）")
 
 df_orphan_refs = pd.DataFrame(
     [
@@ -843,34 +847,149 @@ cont_df = (
 )
 
 # ============================================================
+# チェック結果用 DataFrame 作成
+#
+# 機能：
+# - 旧「引用見出し」「未引用見出し」「見出しなし参照」を統合する
+# - A列に「判定」を追加する
+# - 「頁」を「頁ラベル」へ変更する
+# - 図表キーでソートする
+# ============================================================
+
+# ------------------------------------------------------------
+# 引用見出し → OK
+# ------------------------------------------------------------
+df_check_ok = df_referenced_captions_x.copy()
+df_check_ok.insert(
+    0,
+    "判定",
+    "OK",
+)
+
+# ------------------------------------------------------------
+# 未引用見出し → 未引用
+# ------------------------------------------------------------
+df_check_missing = df_missing_caption_refs_x.copy()
+df_check_missing.insert(
+    0,
+    "判定",
+    "未引用",
+)
+
+# ------------------------------------------------------------
+# 見出しなし参照 → 対応図表なし
+# ------------------------------------------------------------
+df_check_orphan = df_orphan_refs_x.copy()
+df_check_orphan.insert(
+    0,
+    "判定",
+    "対応図表なし",
+)
+
+# ------------------------------------------------------------
+# 3種類を1つに統合
+# ------------------------------------------------------------
+df_check_result = pd.concat(
+    [
+        df_check_ok,
+        df_check_missing,
+        df_check_orphan,
+    ],
+    ignore_index=True,
+    sort=False,
+)
+
+# ------------------------------------------------------------
+# 「頁」→「頁ラベル」
+# ------------------------------------------------------------
+if "頁" in df_check_result.columns:
+    df_check_result = df_check_result.rename(
+        columns={
+            "頁": "頁ラベル",
+        }
+    )
+
+# ------------------------------------------------------------
+# 図表キーでソート
+# ------------------------------------------------------------
+if (
+    "図表キー" in df_check_result.columns
+    and not df_check_result.empty
+):
+    df_check_result = (
+        df_check_result
+        .sort_values(
+            "図表キー",
+            kind="mergesort",
+        )
+        .reset_index(drop=True)
+    )
+
+
+# ============================================================
 # XLSX bytes 生成
 # ============================================================
 _xlsx_output = BytesIO()
 
-with pd.ExcelWriter(_xlsx_output, engine="openpyxl") as writer:
+with pd.ExcelWriter(
+    _xlsx_output,
+    engine="xlsxwriter",
+) as writer:
+
+    # ========================================================
+    # サマリー
+    # ========================================================
     pd.DataFrame(
         {
             "項目": [
                 "全て引用済みか？",
-                "見出しなしの参照はないか？",
+                "対応図表なしの参照はないか？",
             ],
             "結果": [
                 "はい（全て引用あり）✅"
                 if all_captions_referenced
                 else "いいえ（未引用あり）⚠️",
-                "はい（見出しなし参照なし）✅"
+                "はい（対応図表なし参照なし）✅"
                 if not has_refs_without_caption
-                else "いいえ（見出しなし参照あり）⚠️",
+                else "いいえ（対応図表なし参照あり）⚠️",
             ],
         }
-    ).to_excel(writer, sheet_name="サマリー", index=False)
+    ).to_excel(
+        writer,
+        sheet_name="サマリー",
+        index=False,
+    )
 
-    df_referenced_captions_x.to_excel(writer, sheet_name="引用見出し", index=False)
-    df_missing_caption_refs_x.to_excel(writer, sheet_name="未引用見出し", index=False)
-    df_orphan_refs_x.to_excel(writer, sheet_name="見出しなし参照", index=False)
+    # ========================================================
+    # チェック結果
+    #
+    # 旧3シート：
+    # - 引用見出し
+    # - 未引用見出し
+    # - 見出しなし参照
+    #
+    # を1つに統合する
+    # ========================================================
+    df_check_result.to_excel(
+        writer,
+        sheet_name="チェック結果",
+        index=False,
+    )
 
-    dup_df.to_excel(writer, sheet_name="重複（疑い）", index=False)
-    cont_df.to_excel(writer, sheet_name="続き判定", index=False)
+    # ========================================================
+    # その他の既存シート
+    # ========================================================
+    dup_df.to_excel(
+        writer,
+        sheet_name="重複（疑い）",
+        index=False,
+    )
+
+    cont_df.to_excel(
+        writer,
+        sheet_name="続き判定",
+        index=False,
+    )
 
     pd.DataFrame(start_rows).to_excel(
         writer,
@@ -882,6 +1001,345 @@ with pd.ExcelWriter(_xlsx_output, engine="openpyxl") as writer:
         writer,
         sheet_name="欠番チェック",
         index=False,
+    )
+
+    # ========================================================
+    # チェック結果シートの書式
+    # ========================================================
+    wb = writer.book
+    ws = writer.sheets["チェック結果"]
+
+    # --------------------------------------------------------
+    # 共通ステータス書式
+    # --------------------------------------------------------
+    status_formats = create_status_formats(wb)
+
+    judgment_ok_fmt = status_formats["green"]
+    judgment_missing_fmt = status_formats["red"]
+    judgment_orphan_fmt = status_formats["orange"]
+
+    # --------------------------------------------------------
+    # ヘッダー
+    # --------------------------------------------------------
+    header_fmt = wb.add_format(
+        {
+            "bold": True,
+        }
+    )
+
+    # --------------------------------------------------------
+    # 通常文字列
+    # --------------------------------------------------------
+    text_fmt = wb.add_format(
+        {
+            "num_format": "@",
+        }
+    )
+
+    # --------------------------------------------------------
+    # 折り返し
+    # --------------------------------------------------------
+    wrap_fmt = wb.add_format(
+        {
+            "text_wrap": True,
+            "valign": "top",
+        }
+    )
+
+    # --------------------------------------------------------
+    # 説明見出し
+    # --------------------------------------------------------
+    explanation_title_fmt = wb.add_format(
+        {
+            "bold": True,
+            "bg_color": STATUS_BLUE_BG,
+            "valign": "top",
+        }
+    )
+
+    # --------------------------------------------------------
+    # 説明本文
+    # --------------------------------------------------------
+    explanation_fmt = wb.add_format(
+        {
+            "text_wrap": True,
+            "valign": "top",
+        }
+    )
+
+    # ========================================================
+    # 列情報
+    # ========================================================
+    cols = list(
+        df_check_result.columns
+    )
+
+    col_idx = {
+        name: i
+        for i, name in enumerate(cols)
+    }
+
+    # ========================================================
+    # 列幅
+    # ========================================================
+    widths = {
+        "判定": 14,
+        "図表キー": 18,
+        "図表タイトル": 34,
+        "頁ラベル": 14,
+        "pdf頁": 10,
+        "参照頁ラベル": 20,
+        "参照pdf頁": 16,
+        "参照テキスト": 48,
+        "参照テキスト(強調)": 48,
+    }
+
+    for name, width in widths.items():
+        if name not in col_idx:
+            continue
+
+        fmt = (
+            wrap_fmt
+            if name in {
+                "図表タイトル",
+                "参照テキスト",
+                "参照テキスト(強調)",
+            }
+            else text_fmt
+        )
+
+        ws.set_column(
+            col_idx[name],
+            col_idx[name],
+            width,
+            fmt,
+        )
+
+    # ========================================================
+    # ヘッダー
+    # ========================================================
+    for j, name in enumerate(cols):
+        ws.write(
+            0,
+            j,
+            name,
+            header_fmt,
+        )
+
+    # ========================================================
+    # 判定セルの色
+    #
+    # OK         ：緑
+    # 未引用     ：赤
+    # 対応図表なし ：橙
+    # ========================================================
+    if (
+        "判定" in col_idx
+        and len(df_check_result) > 0
+    ):
+        judgment_col = col_idx["判定"]
+
+        for row_no, value in enumerate(
+            df_check_result["判定"],
+            start=1,
+        ):
+            judgment = (
+                ""
+                if pd.isna(value)
+                else str(value)
+            )
+
+            if judgment == "OK":
+                fmt = judgment_ok_fmt
+
+            elif judgment == "未引用":
+                fmt = judgment_missing_fmt
+
+            elif judgment == "対応図表なし":
+                fmt = judgment_orphan_fmt
+
+            else:
+                fmt = text_fmt
+
+            ws.write(
+                row_no,
+                judgment_col,
+                judgment,
+                fmt,
+            )
+
+    # ========================================================
+    # 結果表の下に説明を追加
+    #
+    # 0行目                        ：ヘッダー
+    # 1～len(df_check_result)行目  ：データ
+    # +1行                         ：空行
+    # +2行目                       ：説明見出し
+    # ========================================================
+    explanation_start_row = (
+        len(df_check_result) + 2
+    )
+
+    explanation_last_col = max(
+        len(cols) - 1,
+        0,
+    )
+
+    # --------------------------------------------------------
+    # 説明見出し
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row,
+        0,
+        explanation_start_row,
+        explanation_last_col,
+        "【結果の列について】",
+        explanation_title_fmt,
+    )
+
+    # --------------------------------------------------------
+    # 1. 判定
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 1,
+        0,
+        explanation_start_row + 1,
+        explanation_last_col,
+        (
+            "1.「判定」は，図表見出しと本文中の参照との照合結果です．"
+            "「OK」は見出しがあり本文中でも引用されているもの，"
+            "「未引用」は見出しはあるが本文中の参照が見つからないもの，"
+            "「対応図表なし」は本文中に図表への参照があるが対応する図表見出しが見つからないものです．"
+        ),
+        explanation_fmt,
+    )
+
+    # --------------------------------------------------------
+    # 2. 図表キー
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 2,
+        0,
+        explanation_start_row + 2,
+        explanation_last_col,
+        (
+            "2.「図表キー」は，"
+            "プログラムが図・表・図表の見出しまたは本文中の参照から抽出した"
+            "図表番号を照合用に表したものです．"
+        ),
+        explanation_fmt,
+    )
+
+    # --------------------------------------------------------
+    # 3. 頁ラベル
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 3,
+        0,
+        explanation_start_row + 3,
+        explanation_last_col,
+        (
+            "3.「頁ラベル」は，"
+            "図表見出しが記載されている本文上のページ番号です．"
+            "表紙や目次などがあるため，PDFファイルそのもののページ番号とは"
+            "一致しない場合があります．"
+            "対応する見出しがない場合は空欄または「-」となります．"
+        ),
+        explanation_fmt,
+    )
+
+    # --------------------------------------------------------
+    # 4. pdf頁
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 4,
+        0,
+        explanation_start_row + 4,
+        explanation_last_col,
+        (
+            "4.「pdf頁」は，"
+            "図表見出しがPDFファイルそのものの何ページ目にあるかを示します．"
+            "文書に記載された「頁ラベル」と「pdf頁」は"
+            "一致しない場合があります．"
+        ),
+        explanation_fmt,
+    )
+
+    # --------------------------------------------------------
+    # 5. 参照頁ラベル
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 5,
+        0,
+        explanation_start_row + 5,
+        explanation_last_col,
+        (
+            "5.「参照頁ラベル」は，"
+            "その図表を本文中で参照している箇所のページ番号です．"
+            "複数のページで参照されている場合は，複数のページ番号が記録されます．"
+        ),
+        explanation_fmt,
+    )
+
+    # --------------------------------------------------------
+    # 6. 参照pdf頁
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 6,
+        0,
+        explanation_start_row + 6,
+        explanation_last_col,
+        (
+            "6.「参照pdf頁」は，"
+            "その図表を本文中で参照している箇所がPDFファイルそのものの"
+            "何ページ目にあるかを示します．"
+            "複数のページで参照されている場合は，複数のページ番号が記録されます．"
+        ),
+        explanation_fmt,
+    )
+
+    # ========================================================
+    # 説明行の高さ
+    #
+    # 説明文は折り返して表示するが，
+    # 行間が広くなりすぎないように高さを調整する
+    # ========================================================
+    ws.set_row(
+        explanation_start_row + 1,
+        32,
+    )
+
+    ws.set_row(
+        explanation_start_row + 2,
+        26,
+    )
+
+    ws.set_row(
+        explanation_start_row + 3,
+        32,
+    )
+
+    ws.set_row(
+        explanation_start_row + 4,
+        28,
+    )
+
+    ws.set_row(
+        explanation_start_row + 5,
+        28,
+    )
+
+    ws.set_row(
+        explanation_start_row + 6,
+        28,
+    )
+   
+    # ========================================================
+    # ヘッダー固定
+    # ========================================================
+    ws.freeze_panes(
+        1,
+        0,
     )
 
 _xlsx_bytes = _xlsx_output.getvalue()

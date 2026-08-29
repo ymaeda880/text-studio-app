@@ -39,7 +39,7 @@ AI_SUMMARY_COLUMNS = [
     "図表キー",
     "結果",
     "図表タイトル",
-    "頁",
+    "頁ラベル",
     "pdf頁",
     "参照頁ラベル",
     "参照pdf頁",
@@ -282,7 +282,7 @@ def _caption_info_by_key(df_captions: pd.DataFrame) -> Dict[str, Dict[str, Any]]
         info[str(key)] = {
             "図表キー": str(key),
             "図表タイトル": row.get("見出しタイトル", "") or "",
-            "頁": row.get("page_label", "") or "",
+            "頁ラベル": row.get("page_label", "") or "",
             "pdf頁": row.get("pdf_page", ""),
         }
 
@@ -366,7 +366,7 @@ def build_ai_summary_rows(
                         "図表キー": cap_key,
                         "結果": "",
                         "図表タイトル": cap.get("図表タイトル", ""),
-                        "頁": cap.get("頁", ""),
+                        "頁ラベル": cap.get("頁ラベル", ""),
                         "pdf頁": cap.get("pdf頁", ""),
                         "参照頁ラベル": ref.get("参照頁ラベル", ""),
                         "参照pdf頁": ref.get("参照pdf頁", ""),
@@ -381,7 +381,7 @@ def build_ai_summary_rows(
                     "図表キー": cap_key,
                     "結果": "未引用",
                     "図表タイトル": cap.get("図表タイトル", ""),
-                    "頁": cap.get("頁", ""),
+                    "頁ラベル": cap.get("頁ラベル", ""),
                     "pdf頁": cap.get("pdf頁", ""),
                     "参照頁ラベル": "",
                     "参照pdf頁": "",
@@ -392,7 +392,7 @@ def build_ai_summary_rows(
             )
 
     # ------------------------------------------------------------
-    # 見出しなし参照
+    # 対応図表なし
     # ------------------------------------------------------------
     for ref_bk in sorted(ref_base_keys - cap_base_keys):
         for ref in refs_map.get(ref_bk, []):
@@ -413,9 +413,9 @@ def build_ai_summary_rows(
             rows.append(
                 {
                     "図表キー": ref_key,
-                    "結果": "見出しなし参照",
+                    "結果": "対応図表なし",
                     "図表タイトル": "",
-                    "頁": "",
+                    "頁ラベル": "",
                     "pdf頁": "",
                     "参照頁ラベル": ref.get("参照頁ラベル", ""),
                     "参照pdf頁": ref.get("参照pdf頁", ""),
@@ -478,24 +478,24 @@ def build_ai_summary_frames(
             "図サマリー": empty.copy(),
             "表サマリー": empty.copy(),
             "図表サマリー": empty.copy(),
-            "見出しなし参照": empty.copy(),
+            "対応図表なし": empty.copy(),
         }
 
     df_all["_summary_kind"] = df_all["図表キー"].map(summary_kind_from_key)
 
     df_fig = df_all[
-        (df_all["_summary_kind"] == "図") & (df_all["結果"] != "見出しなし参照")
+        (df_all["_summary_kind"] == "図") & (df_all["結果"] != "対応図表なし")
     ].copy()
 
     df_tbl = df_all[
-        (df_all["_summary_kind"] == "表") & (df_all["結果"] != "見出しなし参照")
+        (df_all["_summary_kind"] == "表") & (df_all["結果"] != "対応図表なし")
     ].copy()
 
     df_figtbl = df_all[
-        (df_all["_summary_kind"] == "図表") & (df_all["結果"] != "見出しなし参照")
+        (df_all["_summary_kind"] == "図表") & (df_all["結果"] != "対応図表なし")
     ].copy()
 
-    df_orphan = df_all[df_all["結果"] == "見出しなし参照"].copy()
+    df_orphan = df_all[df_all["結果"] == "対応図表なし"].copy()
 
     for df in [df_fig, df_tbl, df_figtbl, df_orphan]:
         if "_summary_kind" in df.columns:
@@ -505,7 +505,7 @@ def build_ai_summary_frames(
         "図サマリー": sort_summary_by_pdf_page(df_fig),
         "表サマリー": sort_summary_by_pdf_page(df_tbl),
         "図表サマリー": sort_summary_by_pdf_page(df_figtbl),
-        "見出しなし参照": sort_summary_by_pdf_page(df_orphan),
+        "対応図表なし": sort_summary_by_pdf_page(df_orphan),
     }
 
 
@@ -534,7 +534,7 @@ def build_ai_summary_xlsx_bytes(
         frames["図サマリー"].to_excel(writer, sheet_name="図サマリー", index=False)
         frames["表サマリー"].to_excel(writer, sheet_name="表サマリー", index=False)
         frames["図表サマリー"].to_excel(writer, sheet_name="図表サマリー", index=False)
-        frames["見出しなし参照"].to_excel(writer, sheet_name="見出しなし参照", index=False)
+        frames["対応図表なし"].to_excel(writer, sheet_name="対応図表なし", index=False)
 
     return output.getvalue()
 

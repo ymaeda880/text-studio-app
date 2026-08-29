@@ -63,10 +63,14 @@ SS_TOC_SOURCE = f"{PAGE_NAME}__source_filename"
 
 
 # ============================================================
-# common_lib（正本：ログイン/UI）
+# common_lib（正本：ログイン/UI/Excel）
 # ============================================================
 from common_lib.ui.page_header import render_standard_page_header
 from common_lib.ui.input_source import render_input_source
+from common_lib.excel.status_formats import (
+    STATUS_BLUE_BG,
+    create_status_formats,
+)
 
 # ============================================================
 # lib（目次チェック：ローカル照合）
@@ -276,40 +280,374 @@ st.dataframe(df_result)
 summary = df_result["判定"].value_counts().to_dict() if "判定" in df_result.columns else {}
 st.markdown(f"**結果概要**: {summary}")
 
+
 # ============================================================
-# Excel 出力（列幅/文字列セル設定）
+# Excel 出力
+#
+# 機能：
+# - 「判定」をA列へ移動する
+# - 判定「一致」は緑，「部分一致」は黄色，それ以外は赤
+# - 結果の最終行から1行空けて説明を追記する
+# - 説明欄はセルを結合し，文章を折り返して全文表示する
 # ============================================================
+
+# ------------------------------------------------------------
+# Excel出力用に列順を変更
+# ------------------------------------------------------------
+df_export = df_result.copy()
+
+if "判定" in df_export.columns:
+    export_cols = [
+        "判定",
+        *[
+            col
+            for col in df_export.columns
+            if col != "判定"
+        ],
+    ]
+
+    df_export = df_export[
+        export_cols
+    ]
+
+
+# ------------------------------------------------------------
+# Excel作成
+# ------------------------------------------------------------
 xlsx_buf = io.BytesIO()
-with pd.ExcelWriter(xlsx_buf, engine="xlsxwriter") as writer:
+
+with pd.ExcelWriter(
+    xlsx_buf,
+    engine="xlsxwriter",
+) as writer:
+
     sheet = "result"
-    df_result.to_excel(writer, index=False, sheet_name=sheet)
+
+    df_export.to_excel(
+        writer,
+        index=False,
+        sheet_name=sheet,
+    )
 
     wb = writer.book
     ws = writer.sheets[sheet]
 
-    text_fmt = wb.add_format({"num_format": "@"})
-    header_fmt = wb.add_format({"bold": True})
-    wrap_fmt = wb.add_format({"text_wrap": True})
 
-    cols = list(df_result.columns)
-    col_idx = {n: i for i, n in enumerate(cols)}
+    # ========================================================
+    # 書式
+    # ========================================================
 
-    for name in ["目次頁ラベル", "pdf頁ラベル"]:
+    # --------------------------------------------------------
+    # 通常文字列
+    # --------------------------------------------------------
+    text_fmt = wb.add_format(
+        {
+            "num_format": "@",
+        }
+    )
+
+    # --------------------------------------------------------
+    # ヘッダー
+    # --------------------------------------------------------
+    header_fmt = wb.add_format(
+        {
+            "bold": True,
+        }
+    )
+
+    # --------------------------------------------------------
+    # 折り返し
+    # --------------------------------------------------------
+    wrap_fmt = wb.add_format(
+        {
+            "text_wrap": True,
+            "valign": "top",
+        }
+    )
+
+
+    # --------------------------------------------------------
+    # 共通ステータス書式
+    # --------------------------------------------------------
+    status_formats = create_status_formats(wb)
+
+    judgment_ok_fmt = status_formats["green"]
+    judgment_partial_fmt = status_formats["yellow"]
+    judgment_ng_fmt = status_formats["red"]
+ 
+
+    # --------------------------------------------------------
+    # 説明見出し
+    # --------------------------------------------------------
+    explanation_title_fmt = wb.add_format(
+        {
+            "bold": True,
+            "bg_color": STATUS_BLUE_BG,
+            "valign": "top",
+        }
+    )
+
+    # --------------------------------------------------------
+    # 説明本文
+    #
+    # 結合セル内で折り返す
+    # --------------------------------------------------------
+    explanation_fmt = wb.add_format(
+        {
+            "text_wrap": True,
+            "valign": "top",
+        }
+    )
+
+
+    # ========================================================
+    # 列情報
+    # ========================================================
+    cols = list(
+        df_export.columns
+    )
+
+    col_idx = {
+        name: i
+        for i, name in enumerate(cols)
+    }
+
+
+    # ========================================================
+    # 列幅
+    # ========================================================
+
+    # --------------------------------------------------------
+    # 頁ラベルは文字列として扱う
+    # --------------------------------------------------------
+    for name in [
+        "目次頁ラベル",
+        "pdf頁ラベル",
+    ]:
         if name in col_idx:
-            ws.set_column(col_idx[name], col_idx[name], 16, text_fmt)
+            ws.set_column(
+                col_idx[name],
+                col_idx[name],
+                16,
+                text_fmt,
+            )
 
+    # --------------------------------------------------------
+    # 一致テキスト行
+    # --------------------------------------------------------
     if "一致テキスト行" in col_idx:
-        ws.set_column(col_idx["一致テキスト行"], col_idx["一致テキスト行"], 40, wrap_fmt)
+        ws.set_column(
+            col_idx["一致テキスト行"],
+            col_idx["一致テキスト行"],
+            40,
+            wrap_fmt,
+        )
 
-    widths = {"タイトル": 28, "pdf頁": 10, "判定": 12}
-    for name, w in widths.items():
+    # --------------------------------------------------------
+    # その他
+    # --------------------------------------------------------
+    widths = {
+        "判定": 18,
+        "タイトル": 28,
+        "pdf頁": 10,
+    }
+
+    for name, width in widths.items():
         if name in col_idx:
-            ws.set_column(col_idx[name], col_idx[name], w)
+            ws.set_column(
+                col_idx[name],
+                col_idx[name],
+                width,
+            )
 
+
+    # ========================================================
+    # ヘッダー
+    # ========================================================
     for j, name in enumerate(cols):
-        ws.write(0, j, name, header_fmt)
+        ws.write(
+            0,
+            j,
+            name,
+            header_fmt,
+        )
 
-    ws.freeze_panes(1, 0)
+
+    # ========================================================
+    # 判定セルの色
+    #
+    # 一致     ：緑
+    # 部分一致 ：黄色
+    # その他   ：赤
+    # ========================================================
+    if (
+        "判定" in col_idx
+        and len(df_export) > 0
+    ):
+
+        judgment_col = col_idx[
+            "判定"
+        ]
+
+        for row_no, value in enumerate(
+            df_export["判定"],
+            start=1,
+        ):
+
+            judgment = (
+                ""
+                if pd.isna(value)
+                else str(value)
+            )
+
+            if judgment == "一致":
+                fmt = judgment_ok_fmt
+
+            elif judgment.startswith(
+                "部分一致"
+            ):
+                fmt = judgment_partial_fmt
+
+            else:
+                fmt = judgment_ng_fmt
+
+            ws.write(
+                row_no,
+                judgment_col,
+                judgment,
+                fmt,
+            )
+
+
+    # ========================================================
+    # 結果表の下に説明を追加
+    # ========================================================
+
+    # --------------------------------------------------------
+    # 結果表の最終データ行の次を1行空ける
+    #
+    # 0行目               ：ヘッダー
+    # 1～len(df_export)行目：データ
+    # +1行                ：空行
+    # +2行目              ：説明見出し
+    # --------------------------------------------------------
+    explanation_start_row = (
+        len(df_export) + 2
+    )
+
+    # --------------------------------------------------------
+    # 説明欄はA列から結果表の最終列まで結合する
+    # --------------------------------------------------------
+    explanation_last_col = max(
+        len(cols) - 1,
+        0,
+    )
+
+
+    # --------------------------------------------------------
+    # 説明見出し
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row,
+        0,
+        explanation_start_row,
+        explanation_last_col,
+        "【結果の列について】",
+        explanation_title_fmt,
+    )
+
+
+    # --------------------------------------------------------
+    # 1. 目次頁ラベル
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 1,
+        0,
+        explanation_start_row + 1,
+        explanation_last_col,
+        (
+            "1.「目次頁ラベル」は，"
+            "目次に記載されているページ番号です．"
+            "「12」のような通常の数字だけでなく，"
+            "「2-1」，「2-1-2」，「資料1」，"
+            "「資料2-1」などの形式もあります．"
+        ),
+        explanation_fmt,
+    )
+
+
+    # --------------------------------------------------------
+    # 2. pdf頁ラベル
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 2,
+        0,
+        explanation_start_row + 2,
+        explanation_last_col,
+        (
+            "2.「pdf頁ラベル」は，"
+            "プログラムが対応する本文ページとして検出した"
+            "PDF本文上のページ番号です．"
+            "目次と本文が正しく対応している場合は，通常，"
+            "「目次頁ラベル」と「pdf頁ラベル」が一致します．"
+            "対応ページを検出できなかった場合は「-」となります．"
+        ),
+        explanation_fmt,
+    )
+
+
+    # --------------------------------------------------------
+    # 3. pdf頁
+    # --------------------------------------------------------
+    ws.merge_range(
+        explanation_start_row + 3,
+        0,
+        explanation_start_row + 3,
+        explanation_last_col,
+        (
+            "3.「pdf頁」は，"
+            "対応するページがPDFファイルそのものの"
+            "何ページ目にあるかを示します．"
+            "表紙や目次などがあるため，"
+            "文書に記載された「pdf頁ラベル」と"
+            "PDFファイル上の「pdf頁」は"
+            "一致しない場合があります．"
+            "対応ページを検出できなかった場合は「-」となります．"
+        ),
+        explanation_fmt,
+    )
+
+
+    # ========================================================
+    # 説明行の高さ
+    #
+    # 説明1～3の間には空行を入れない
+    # 結合セル内で文章を折り返して全文を表示する
+    # ========================================================
+    ws.set_row(
+        explanation_start_row + 1,
+        34,
+    )
+
+    ws.set_row(
+        explanation_start_row + 2,
+        48,
+    )
+
+    ws.set_row(
+        explanation_start_row + 3,
+        48,
+    )
+
+
+    # ========================================================
+    # ヘッダー固定
+    # ========================================================
+    ws.freeze_panes(
+        1,
+        0,
+    )
+
 
 base = input_result.file_name.rsplit(".", 1)[0]
 xlsx_filename = f"目次チェック_{base}.xlsx"

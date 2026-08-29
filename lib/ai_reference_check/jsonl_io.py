@@ -95,11 +95,10 @@ def df_to_ai_records(
         records.append(
             {
                 "row_id": int(row.get("row_id")),
-                "sheet": str(row.get("sheet", "") or ""),
                 "図表キー": str(row.get("図表キー", "") or ""),
                 "結果": str(row.get("結果", "") or ""),
                 "図表タイトル": str(row.get("図表タイトル", "") or ""),
-                "頁": str(row.get("頁", "") or ""),
+                "頁ラベル": str(row.get("頁ラベル", "") or ""),
                 "pdf頁": str(row.get("pdf頁", "") or ""),
                 "参照頁ラベル": str(row.get("参照頁ラベル", "") or ""),
                 "参照pdf頁": str(row.get("参照pdf頁", "") or ""),

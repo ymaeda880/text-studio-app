@@ -47,7 +47,7 @@ def normalize_record_for_prompt(row: Dict[str, Any]) -> Dict[str, Any]:
         "figure_key": str(row.get("図表キー", "") or ""),
         "existing_result": str(row.get("結果", "") or ""),
         "figure_title": normalize_ai_text(str(row.get("図表タイトル", "") or "")),
-        "page_label": str(row.get("頁", "") or ""),
+        "page_label": str(row.get("頁ラベル", "") or ""),
         "pdf_page": str(row.get("pdf頁", "") or ""),
         "reference_page_label": str(row.get("参照頁ラベル", "") or ""),
         "reference_pdf_page": str(row.get("参照pdf頁", "") or ""),
@@ -77,7 +77,7 @@ def build_reference_check_payload(
             "OK": "図表タイトルと本文参照文脈が自然に対応している",
             "CHECK": "判断材料が不足、または少し怪しいため人間確認が必要",
             "NG": "本文参照文脈が図表タイトルと明らかに対応していない可能性が高い",
-            "SKIP": "未引用など、意味判定の対象外",
+            "SKIP": "未引用または対応図表なしなど、意味判定の対象外",
         },
         "records": [
             normalize_record_for_prompt(row)
@@ -101,7 +101,7 @@ def build_reference_check_prompt_text(payload: Dict[str, Any]) -> str:
 - 図表タイトルと参照文脈が意味的に対応していれば OK。
 - 文脈が短すぎる、抽出ノイズが混ざっている、判断に迷う場合は CHECK。
 - 図表タイトルと明らかに違う内容を本文が説明している場合は NG。
-- existing_result が「未引用」のように参照文が空の場合は SKIP。
+- existing_result が「未引用」または「対応図表なし」の場合は SKIP。
 
 必ず次のJSON形式だけで返してください。説明文やMarkdownは不要です。
 
