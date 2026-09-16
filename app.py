@@ -194,7 +194,7 @@ navigation_pages = {
     # 文章校閲 v2
     # ========================================================
 
-    f"{NAV_PROCESS_ICON} 文章校閲 v2": nav_group(
+    f"{NAV_PROCESS_ICON} 文章校閲 ハイライト": nav_group(
         [
             nav_page(
                 "pages/400_文章校正2.py",
