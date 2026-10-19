@@ -91,6 +91,18 @@ from common_lib.ui.model_picker import render_text_model_picker
 # ============================================================
 from common_lib.ai.costs.fx import get_default_usd_jpy
 
+# ============================================================
+# common_lib（Inbox保存）
+# ============================================================
+
+from common_lib.inbox.inbox_ops.ingest import ingest_to_inbox
+
+from common_lib.inbox.inbox_common.types import (
+    IngestRequest,
+    InboxNotAvailable,
+    QuotaExceeded,
+    IngestFailed,
+)
 
 # ============================================================
 # lib（Word解析）
@@ -119,15 +131,16 @@ from lib.bulk_word_proofreading.explanation import (
 )
 
 # ============================================================
-# lib（校正プロンプト）
+# lib（一括Word校正：校正プロンプト）
 # ============================================================
-from lib.proofreading.prompts import (
-    MODE_DEFS,
-    COMMON_PROMPT,
-    get_analyze_instruction,
-    build_system_prompt,
+from lib.bulk_word_proofreading.word_proofreading_prompts import (
+    WORD_PROOFREADING_MODE_DEFS,
+    WORD_ANALYSIS_PROMPT,
+    get_word_analyze_instruction,
+    build_word_system_prompt,
 )
 
+from lib.proofreading.prompts import COMMON_PROMPT
 # ============================================================
 # lib（校正UI）
 # ============================================================
@@ -204,7 +217,7 @@ render_bulk_word_proofreading_help_expander(
 # 定数（モデル / 校正モード）
 # ============================================================
 DEFAULT_MODEL_KEY = DEFAULT_TEXT_MODEL_KEY
-WORD_EDIT_DEFAULT_MODE = "解析文書校正（通常校正）"
+WORD_EDIT_DEFAULT_MODE = "通常校正"
 
 # ============================================================
 # セッションキー（モデル / 入力 / 選択）
@@ -754,34 +767,68 @@ def _render_highlighted_numbered_preview(
 # ------------------------------------------------------------
 def render_policy_preview(*, mode: str) -> str:
     # ------------------------------------------------------------
-    # 03_文章校正.py と同様
+    # 一括Word校正専用のプロンプト設定を表示する
     # ------------------------------------------------------------
-    analyze_base = get_analyze_instruction(mode)
+    analyze_base = get_word_analyze_instruction(mode)
 
-    with st.expander("🧭 解析プロンプト設定（クリックで展開）", expanded=False):
-        tab3, tab1, tab2 = st.tabs(["✍️ 追加プロンプト", "🧭 System", "📋 共通方針"])
+    with st.expander(
+        "🧭 解析プロンプト設定（クリックで展開）",
+        expanded=False,
+    ):
+        tab4, tab1, tab2, tab3 = st.tabs(
+            [
+                "✍️ 追加プロンプト",
+                "📄 Word文書",
+                "🧭 校正レベル",
+                "📋 共通方針",
+            ]
+        )
 
         with tab1:
-            st.markdown("#### 🧭 解析プロンプト（解析モード）")
-            st.code(analyze_base, language="markdown")
+            st.markdown(
+                "#### 📄 Word解析文書に関する共通指示"
+            )
+            st.code(
+                WORD_ANALYSIS_PROMPT.strip(),
+                language="markdown",
+            )
 
         with tab2:
-            st.markdown("#### 📋 共通方針（毎回付与）")
-            st.code(COMMON_PROMPT.strip(), language="markdown")
+            st.markdown(
+                f"#### 🧭 校正レベル：{mode}"
+            )
+            st.code(
+                analyze_base,
+                language="markdown",
+            )
 
         with tab3:
-            st.markdown("#### ✍️ 追加プロンプト（任意）")
+            st.markdown(
+                "#### 📋 共通方針（毎回付与）"
+            )
+            st.code(
+                COMMON_PROMPT.strip(),
+                language="markdown",
+            )
+
+        with tab4:
+            st.markdown(
+                "#### ✍️ 追加プロンプト（任意）"
+            )
+
             extra = st.text_area(
                 "追加プロンプトを入力",
                 key="extra_user_prompt",
-                placeholder="例）外来語はカタカナ優先。製品名や固有名詞は原文どおりに保持。",
+                placeholder=(
+                    "例）外来語はカタカナ優先。"
+                    "製品名や固有名詞は原文どおりに保持。"
+                ),
                 height=100,
             ) or ""
 
             return extra
 
     return ""
-
 
 # 🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
 # ============================================================
@@ -793,7 +840,7 @@ def render_policy_preview(*, mode: str) -> str:
 # Sidebar（設定）
 # ============================================================
 with st.sidebar:
-    st.header("設定")
+    #st.header("設定")
 
     # ------------------------------------------------------------
     # モデル選択
@@ -810,35 +857,55 @@ with st.sidebar:
     # ------------------------------------------------------------
     # 解析モード
     # ------------------------------------------------------------
-    st.caption("このページでは，中間テキスト校正のため，原則「解析文書校正」を使用してください。")
+    st.caption(
+        "Word文書の構造を考慮して校正します．"
+        "校正の強さを選択してください．"
+        "通常は「通常校正」を使用してください．"
+    )
 
-    options = list(MODE_DEFS.keys())
-    default_index = options.index(WORD_EDIT_DEFAULT_MODE)
+    options = list(
+        WORD_PROOFREADING_MODE_DEFS.keys()
+    )
 
     st.radio(
         "🛠 解析モード",
         options=options,
         key=K_PROOF_MODE,
-        help="\n\n".join([f"・{k}: {v['desc']}" for k, v in MODE_DEFS.items()]),
+        help="\n\n".join(
+            [
+                f"・{k}: {v['desc']}"
+                for k, v
+                in WORD_PROOFREADING_MODE_DEFS.items()
+            ]
+        ),
     )
 
     # ------------------------------------------------------------
-    # ダウンロード形式
+    # ダウンロード設定
     # ------------------------------------------------------------
-    _DL_LABELS = {
-        "pdf": "PDF (.pdf)",
-        "word": "Word (.docx)",
-    }
+    st.divider()
 
     st.radio(
-        "📦 ダウンロード形式（解析レポート）",
-        options=list(_DL_LABELS.keys()),
-        format_func=lambda k: _DL_LABELS[k],
+        "📦 ダウンロード形式",
+        options=[
+            "PDF（.pdf）",
+            "Word（.docx）",
+        ],
         index=0,
-        key=f"{PAGE_NAME}__dl_format_radio",
+        key=f"{PAGE_NAME}__download_format",
     )
 
-    st.markdown("---")
+    st.radio(
+        "📁 ダウンロード場所",
+        options=[
+            "ダウンロードフォルダー",
+            "Inbox",
+        ],
+        index=0,
+        key=f"{PAGE_NAME}__download_destination",
+    )
+
+    st.divider()
 
     # ------------------------------------------------------------
     # Word解析オプション
@@ -1210,7 +1277,7 @@ if want_analyze:
     # ------------------------------------------------------------
     mode = str(st.session_state.get(K_PROOF_MODE) or WORD_EDIT_DEFAULT_MODE)
 
-    system_prompt = build_system_prompt(
+    system_prompt = build_word_system_prompt(
         mode=mode,
         extra=str(extra_prompt or ""),
     )
@@ -1384,63 +1451,185 @@ if saved_plan_md:
     usd_jpy = float(fx.usd_jpy)
 
     def _format_cost_lines_stub(*args: Any, **kwargs: Any) -> list[str]:
-        return ["概算: —（このレポートでは推計しません）"]
+        # ------------------------------------------------------------
+        # AI実行時に取得済みの料金をレポートへ表示する
+        # - ここでは料金を再計算・推計しない
+        # - apply_text_result_to_busy が返した cost_obj.jpy を使用する
+        # ------------------------------------------------------------
+        cost_obj = st.session_state.get(K_LAST_COST_OBJ)
 
-    dl_choice_key = str(
-        st.session_state.get(f"{PAGE_NAME}__dl_format_radio") or "pdf"
+        if cost_obj is None:
+            return ["AI利用料金：—"]
+
+        cost_jpy = getattr(cost_obj, "jpy", None)
+
+        if not isinstance(cost_jpy, (int, float)):
+            return ["AI利用料金：—"]
+
+        return [
+            f"AI利用料金：約 {float(cost_jpy):,.2f}円"
+        ]
+
+    # ------------------------------------------------------------
+    # サイドバーで選択したダウンロード設定
+    # ------------------------------------------------------------
+    download_format = str(
+        st.session_state.get(
+            f"{PAGE_NAME}__download_format",
+            "PDF（.pdf）",
+        )
     )
 
-    if dl_choice_key == "pdf":
-        pdf_bytes = build_policy_pdf_bytes_core(
+    download_destination = str(
+        st.session_state.get(
+            f"{PAGE_NAME}__download_destination",
+            "ダウンロードフォルダー",
+        )
+    )
+
+    is_pdf = download_format == "PDF（.pdf）"
+    is_download = (
+        download_destination == "ダウンロードフォルダー"
+    )
+
+    # ------------------------------------------------------------
+    # 選択された形式のレポートを生成
+    # ------------------------------------------------------------
+    if is_pdf:
+        report_data = build_policy_pdf_bytes_core(
             original_numbered_preview=saved_numbered_preview,
             plan_md=saved_plan_md,
             model=saved_model,
             mode=saved_mode,
             extra_prompt=saved_extra_prompt,
-            src_name=saved_used_file_name or "word_intermediate.txt",
+            src_name=(
+                saved_used_file_name
+                or "word_intermediate.txt"
+            ),
             usage_summary=usage_summary,
             usd_jpy=usd_jpy,
             format_cost_lines=_format_cost_lines_stub,
         )
 
-        if pdf_bytes:
+        report_filename = f"{file_stub}.pdf"
+        report_mime = "application/pdf"
+        report_action = "proofreading_report_pdf"
+        report_tags_json = (
+            '["text_studio/proofreading_report/pdf"]'
+        )
+
+    else:
+        report_data, ext = build_policy_docx_bytes_core(
+            original_numbered_preview=saved_numbered_preview,
+            plan_md=saved_plan_md,
+            model=saved_model,
+            mode=saved_mode,
+            extra_prompt=saved_extra_prompt,
+            src_name=(
+                saved_used_file_name
+                or "word_intermediate.txt"
+            ),
+            usage_summary=usage_summary,
+            usd_jpy=usd_jpy,
+            format_cost_lines=_format_cost_lines_stub,
+        )
+
+        report_filename = f"{file_stub}{ext}"
+
+        if ext == ".docx":
+            report_mime = (
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            )
+        else:
+            report_mime = "text/plain"
+
+        report_action = "proofreading_report_word"
+        report_tags_json = (
+            '["text_studio/proofreading_report/word"]'
+        )
+
+    # ------------------------------------------------------------
+    # ダウンロードフォルダーへ保存
+    # - ブラウザのダウンロード機能を使用する
+    # ------------------------------------------------------------
+    if is_download:
+        if report_data:
             st.download_button(
-                "PDFとして保存",
-                data=pdf_bytes,
-                file_name=f"{file_stub}.pdf",
-                mime="application/pdf",
-                key=f"{PAGE_NAME}__dl_pdf_{file_stub}",
+                "ダウンロード",
+                data=report_data,
+                file_name=report_filename,
+                mime=report_mime,
+                key=f"{PAGE_NAME}__download_report",
+                on_click="ignore",
             )
         else:
             st.warning(
-                "PDF を生成できませんでした。`pip install reportlab` を実行し、"
-                "CIDフォント（HeiseiMin/HeiseiKakuGo）が使えるか確認してください。"
+                f"{download_format}を生成できませんでした。"
             )
 
+    # ------------------------------------------------------------
+    # Inboxへ保存
+    # ------------------------------------------------------------
     else:
-        data_docx, ext = build_policy_docx_bytes_core(
-            original_numbered_preview=saved_numbered_preview,
-            plan_md=saved_plan_md,
-            model=saved_model,
-            mode=saved_mode,
-            extra_prompt=saved_extra_prompt,
-            src_name=saved_used_file_name or "word_intermediate.txt",
-            usage_summary=usage_summary,
-            usd_jpy=usd_jpy,
-            format_cost_lines=_format_cost_lines_stub,
-        )
+        if st.button(
+            "ダウンロード",
+            type="primary",
+            key=f"{PAGE_NAME}__save_report_to_inbox",
+        ):
+            try:
+                if not report_data:
+                    st.error(
+                        f"❌ {download_format}が生成されていないため"
+                        "保存できません。"
+                    )
+                    st.stop()
 
-        st.download_button(
-            "Word（.docx）として保存" if ext == ".docx" else "テキスト（.txt）として保存",
-            data=data_docx,
-            file_name=f"{file_stub}{ext}",
-            mime=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                if ext == ".docx"
-                else "text/plain"
-            ),
-            key=f"{PAGE_NAME}__dl_word_{file_stub}",
-        )
+                origin = {
+                    "app": APP_NAME,
+                    "page": PAGE_NAME,
+                    "source_filename": (
+                        saved_used_file_name
+                        or "word_intermediate.txt"
+                    ),
+                    "mode": saved_mode,
+                    "model": saved_model,
+                    "action": report_action,
+                }
+
+                ingest_to_inbox(
+                    projects_root=PROJECTS_ROOT,
+                    req=IngestRequest(
+                        user_sub=sub,
+                        filename=report_filename,
+                        data=report_data,
+                        tags_json=report_tags_json,
+                        origin=origin,
+                    ),
+                )
+
+                st.success(
+                    f"{download_format}をInboxに保存しました。"
+                )
+
+            except InboxNotAvailable:
+                st.error(
+                    "❌ Inbox が存在しません。"
+                    "ストレージ接続を確認してください。"
+                )
+
+            except QuotaExceeded as e:
+                st.error(
+                    f"❌ 容量オーバーです。"
+                    f" 現在={e.current} / "
+                    f"追加={e.incoming} / "
+                    f"上限={e.quota}"
+                )
+
+            except IngestFailed as e:
+                st.error(
+                    f"❌ Inbox への保存に失敗しました: {e}"
+                )
 
 # ============================================================
 # 初期案内

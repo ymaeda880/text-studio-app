@@ -247,6 +247,12 @@ navigation_pages = {
                 url_path="19_AIチャット要約",
                 developer_only=True,
             ),
+            nav_page(
+                "pages/800_AIチャット2.py",
+                title="AIチャット2",
+                icon="💬",
+                url_path="800_AIチャット2",
+            ),
         ],
     ),
 

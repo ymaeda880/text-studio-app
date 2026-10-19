@@ -23,8 +23,9 @@ def build_policy_docx_bytes(
     """Word（.docx）でレポート出力：原文=等幅風/自動折返し、校正方針=Markdown文字列そのまま"""
     try:
         from docx import Document
-        from docx.shared import Pt
+        from docx.shared import Pt, Inches
         from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
     except Exception:
         add_lines = []
         if usage_summary and usd_jpy is not None:
@@ -82,14 +83,95 @@ def build_policy_docx_bytes(
     except Exception:
         pass
 
-    doc.add_heading("校正方針（Markdown）", level=1)
-    para2 = doc.add_paragraph()
-    r2 = para2.add_run(plan_md if plan_md else "(なし)")
-    try:
-        r2.font.name = "Courier New"
-        r2.font.size = Pt(10)
-    except Exception:
-        pass
+    # ============================================================
+    # 校正方針
+    # - Markdown表を解析してWordの実表として出力する
+    # - PDF側と同じ parse_plan_md_tables() を使用する
+    # ============================================================
+    doc.add_heading("校正方針", level=1)
+
+    items = parse_plan_md_tables(plan_md)
+
+    if items:
+        table = doc.add_table(
+            rows=1,
+            cols=5,
+        )
+        table.style = "Table Grid"
+        table.autofit = False
+
+        # ------------------------------------------------------------
+        # 列幅
+        # ------------------------------------------------------------
+        widths = (
+            0.55,
+            0.55,
+            1.45,
+            1.55,
+            2.60,
+        )
+
+        headers = (
+            "行",
+            "重要度",
+            "原文",
+            "修正案",
+            "理由",
+        )
+
+        # ------------------------------------------------------------
+        # ヘッダー
+        # ------------------------------------------------------------
+        header_cells = table.rows[0].cells
+
+        for i, header in enumerate(headers):
+            header_cells[i].width = Inches(widths[i])
+
+            paragraph = header_cells[i].paragraphs[0]
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            run = paragraph.add_run(header)
+            run.bold = True
+            run.font.size = Pt(9)
+
+        # ------------------------------------------------------------
+        # データ行
+        # ------------------------------------------------------------
+        for item in items:
+            cells = table.add_row().cells
+
+            values = (
+                str(item.get("行", "") or ""),
+                str(item.get("重要度", "") or ""),
+                str(item.get("原文", "") or ""),
+                str(item.get("修正案", "") or ""),
+                str(item.get("理由", "") or ""),
+            )
+
+            for i, value in enumerate(values):
+                cells[i].width = Inches(widths[i])
+
+                paragraph = cells[i].paragraphs[0]
+
+                if i in (0, 1):
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                else:
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+                run = paragraph.add_run(value)
+                run.font.size = Pt(9)
+
+        # ------------------------------------------------------------
+        # 表全体
+        # ------------------------------------------------------------
+        for row in table.rows:
+            for cell in row.cells:
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+
+    else:
+        doc.add_paragraph(
+            plan_md if plan_md else "(なし)"
+        )
 
     bio = io.BytesIO()
     doc.save(bio)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# text_studio_app/pages/03_文章校正.py
+# text_studio_app/pages/400_文章校正2.py
 # ============================================================
 # 📝 文章校正（解析：校正方針の抽出）
 #
@@ -120,19 +120,18 @@ from lib.text_loaders import (
 # ============================================================
 # lib（校正プロンプト）
 # ============================================================
-from lib.proofreading.prompts import (
-    COMMON_PROMPT,
-    MODE_DEFS,
-    build_system_prompt,
-    get_analyze_instruction,
+from lib.bulk_word_proofreading.word_proofreading_prompts import (
+    WORD_PROOFREADING_MODE_DEFS,
+    WORD_PROOFREADING_DEFAULT_MODE,
+    build_word_system_prompt,
 )
 
 # ============================================================
 # lib（校正説明UI）
 # ============================================================
-from lib.proofreading.explanation import (
-    render_proofreading_page_intro,
-    render_proofreading_help_expander,
+from lib.explanations.exp_proofreading2 import (
+    render_proofreading2_page_intro,
+    render_proofreading2_help_expander,
 )
 
 # ============================================================
@@ -174,12 +173,12 @@ sub, theme, BANNER_KEY, settings = render_standard_page_header(
 # ============================================================
 # ページ説明
 # ============================================================
-render_proofreading_page_intro()
+render_proofreading2_page_intro()
 
 # ============================================================
 # ヘルプ
 # ============================================================
-render_proofreading_help_expander(
+render_proofreading2_help_expander(
     theme=theme,
 )
 
@@ -201,8 +200,8 @@ render_proofreading_help_expander(
 # 定数（モデル / モード / Inbox）
 # ============================================================
 DEFAULT_MODEL_KEY = DEFAULT_TEXT_MODEL_KEY
-DEFAULT_MODE = "通常校正"
-INBOX_DEFAULT_MODE = "解析文書校正（通常校正）"
+DEFAULT_MODE = WORD_PROOFREADING_DEFAULT_MODE
+INBOX_DEFAULT_MODE = WORD_PROOFREADING_DEFAULT_MODE
 INBOX_PAGE_SIZE = 8
 
 # ============================================================
@@ -909,12 +908,46 @@ with st.sidebar:
     # ------------------------------------------------------------
     # 解析モード
     # ------------------------------------------------------------
-    st.caption("「解析モード」は，word解析で作成した中間ファイルを構成するときは，「解析文書校正」を選択してください．")
+    st.caption(
+        "校正の強さを選択してください．"
+        "通常は「通常校正」を使用してください．"
+    )
+
     st.radio(
-        "🛠 解析モード",
-        options=list(MODE_DEFS.keys()),
+        "🛠 校正レベル",
+        options=list(WORD_PROOFREADING_MODE_DEFS.keys()),
         key="proof_mode",
-        help="\n\n".join([f"・{k}: {v['desc']}" for k, v in MODE_DEFS.items()]),
+        help="\n\n".join(
+            [
+                f"・{k}: {v['desc']}"
+                for k, v in WORD_PROOFREADING_MODE_DEFS.items()
+            ]
+        ),
+    )
+
+    # ------------------------------------------------------------
+    # ダウンロード設定
+    # ------------------------------------------------------------
+    st.divider()
+
+    st.radio(
+        "📦 ダウンロード形式",
+        options=[
+            "PDF（.pdf）",
+            "Word（.docx）",
+        ],
+        index=0,
+        key=f"{PAGE_NAME}__download_format",
+    )
+
+    st.radio(
+        "📁 ダウンロード場所",
+        options=[
+            "ダウンロードフォルダー",
+            "Inbox",
+        ],
+        index=0,
+        key=f"{PAGE_NAME}__download_destination",
     )
 
 
@@ -976,29 +1009,29 @@ run_clicked = st.button(
 #     st.stop()
 
 
-current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
-st.markdown(
-    f"""
-    <div style="
-        padding:6px 10px;
-        border-radius:6px;
-        background-color:#ffe9c6;
-        color:#8a4b0f;
-        font-weight:bold;
-        font-size:0.95rem;
-        border:1px solid #f0b76a;
-        white-space:nowrap;
-        display:inline-block;
-    ">
-        🧭 解析モード：{current_mode}
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-st.markdown(
-        "<div style='height:16px'></div>",
-        unsafe_allow_html=True,
-    )
+# current_mode = st.session_state.get("proof_mode", DEFAULT_MODE)
+# st.markdown(
+#     f"""
+#     <div style="
+#         padding:6px 10px;
+#         border-radius:6px;
+#         background-color:#ffe9c6;
+#         color:#8a4b0f;
+#         font-weight:bold;
+#         font-size:0.95rem;
+#         border:1px solid #f0b76a;
+#         white-space:nowrap;
+#         display:inline-block;
+#     ">
+#         🧭 解析モード：{current_mode}
+#     </div>
+#     """,
+#     unsafe_allow_html=True,
+# )
+# st.markdown(
+#         "<div style='height:16px'></div>",
+#         unsafe_allow_html=True,
+#     )
 
 
 # ============================================================
@@ -1209,9 +1242,12 @@ if want_analyze:
     # ------------------------------------------------------------
     # System / prompt（ページ責務：方針の組み立て）
     # ------------------------------------------------------------
-    mode = str(st.session_state.get("proof_mode") or DEFAULT_MODE)
+    mode = str(
+        st.session_state.get("proof_mode")
+        or DEFAULT_MODE
+    )
 
-    system_prompt = build_system_prompt(
+    system_prompt = build_word_system_prompt(
         mode=mode,
         extra=str(extra_prompt or ""),
     )
@@ -1402,7 +1438,24 @@ if st.session_state.get(K_LAST_PLAN_MD):
     usd_jpy = float(fx.usd_jpy)
 
     def _format_cost_lines_stub(*args: Any, **kwargs: Any) -> list[str]:
-        return ["概算: —（このレポートでは推計しません）"]
+        # ------------------------------------------------------------
+        # AI実行時に取得済みの料金をレポートへ表示する
+        # - ここでは料金を再計算・推計しない
+        # - apply_text_result_to_busy が返した cost_obj.jpy を使用する
+        # ------------------------------------------------------------
+        cost_obj = st.session_state.get(K_LAST_COST_OBJ)
+
+        if cost_obj is None:
+            return ["AI利用料金：—"]
+
+        cost_jpy = getattr(cost_obj, "jpy", None)
+
+        if not isinstance(cost_jpy, (int, float)):
+            return ["AI利用料金：—"]
+
+        return [
+            f"AI利用料金：約 {float(cost_jpy):,.2f}円"
+        ]
 
     if not st.session_state.get(K_LAST_PDF_BYTES):
         pdf_bytes = build_policy_pdf_bytes_core(
@@ -1445,119 +1498,138 @@ if st.session_state.get(K_LAST_PLAN_MD):
             "model": str(st.session_state.get(K_LAST_CHOSEN_MODEL) or ""),
         }
 
-    col_pdf_dl, col_word_dl, col_pdf_inbox, col_word_inbox = st.columns(4)
+    # ------------------------------------------------------------
+    # サイドバーで選択したダウンロード設定
+    # ------------------------------------------------------------
+    download_format = str(
+        st.session_state.get(
+            f"{PAGE_NAME}__download_format",
+            "PDF（.pdf）",
+        )
+    )
 
-    with col_pdf_dl:
-        if st.session_state.get(K_LAST_PDF_BYTES):
+    download_destination = str(
+        st.session_state.get(
+            f"{PAGE_NAME}__download_destination",
+            "ダウンロードフォルダー",
+        )
+    )
+
+    is_pdf = download_format == "PDF（.pdf）"
+    is_download = download_destination == "ダウンロードフォルダー"
+
+    # ------------------------------------------------------------
+    # ダウンロードフォルダーへ保存
+    # - ブラウザのダウンロード機能を使用する
+    # ------------------------------------------------------------
+    if is_download:
+        if is_pdf:
+            download_data = st.session_state.get(K_LAST_PDF_BYTES)
+            download_name = st.session_state.get(K_LAST_PDF_NAME)
+            download_mime = "application/pdf"
+        else:
+            download_data = st.session_state.get(K_LAST_DOCX_BYTES)
+            download_name = st.session_state.get(K_LAST_DOCX_NAME)
+            download_mime = (
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            )
+
+        if download_data and download_name:
             st.download_button(
-                "PDFとして保存",
-                data=st.session_state[K_LAST_PDF_BYTES],
-                file_name=st.session_state[K_LAST_PDF_NAME],
-                mime="application/pdf",
-                key=f"{PAGE_NAME}__dl_pdf",
+                "ダウンロード",
+                data=download_data,
+                file_name=download_name,
+                mime=download_mime,
+                key=f"{PAGE_NAME}__download_report",
                 on_click="ignore",
             )
         else:
-            st.warning("PDFを生成できませんでした。")
-
-    with col_word_dl:
-        if st.session_state.get(K_LAST_DOCX_BYTES):
-            st.download_button(
-                "Wordとして保存",
-                data=st.session_state[K_LAST_DOCX_BYTES],
-                file_name=st.session_state[K_LAST_DOCX_NAME],
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                key=f"{PAGE_NAME}__dl_word",
-                on_click="ignore",
+            st.warning(
+                f"{download_format}を生成できませんでした。"
             )
-        else:
-            st.warning("Wordを生成できませんでした。")
 
-    with col_pdf_inbox:
+    # ------------------------------------------------------------
+    # Inboxへ保存
+    # ------------------------------------------------------------
+    else:
         if st.button(
-            "PDFをInboxへ保存",
-            type="secondary",
-            key=f"{PAGE_NAME}__save_pdf_to_inbox",
+            "ダウンロード",
+            type="primary",
+            key=f"{PAGE_NAME}__save_report_to_inbox",
         ):
             try:
-                pdf_data = st.session_state.get(K_LAST_PDF_BYTES)
-                pdf_filename = st.session_state.get(K_LAST_PDF_NAME)
-                origin_base = dict(st.session_state.get(K_LAST_REPORT_ORIGIN) or {})
+                if is_pdf:
+                    save_data = st.session_state.get(
+                        K_LAST_PDF_BYTES
+                    )
+                    save_filename = st.session_state.get(
+                        K_LAST_PDF_NAME
+                    )
+                    action = "proofreading_report_pdf"
+                    tags_json = (
+                        '["text_studio/proofreading_report/pdf"]'
+                    )
+                else:
+                    save_data = st.session_state.get(
+                        K_LAST_DOCX_BYTES
+                    )
+                    save_filename = st.session_state.get(
+                        K_LAST_DOCX_NAME
+                    )
+                    action = "proofreading_report_word"
+                    tags_json = (
+                        '["text_studio/proofreading_report/word"]'
+                    )
 
-                if not pdf_data or not pdf_filename:
-                    st.error("❌ PDFが生成されていないため保存できません。")
+                if not save_data or not save_filename:
+                    st.error(
+                        f"❌ {download_format}が生成されていないため"
+                        "保存できません。"
+                    )
                     st.stop()
 
-                origin = dict(origin_base)
-                origin["action"] = "proofreading_report_pdf"
+                origin = dict(
+                    st.session_state.get(
+                        K_LAST_REPORT_ORIGIN
+                    )
+                    or {}
+                )
+                origin["action"] = action
 
                 ingest_to_inbox(
                     projects_root=PROJECTS_ROOT,
                     req=IngestRequest(
                         user_sub=sub,
-                        filename=pdf_filename,
-                        data=pdf_data,
-                        tags_json='["text_studio/proofreading_report/pdf"]',
+                        filename=save_filename,
+                        data=save_data,
+                        tags_json=tags_json,
                         origin=origin,
                     ),
                 )
 
-                st.success("PDFをInboxに保存しました。")
+                st.success(
+                    f"{download_format}をInboxに保存しました。"
+                )
 
             except InboxNotAvailable:
-                st.error("❌ Inbox が存在しません。ストレージ接続を確認してください。")
+                st.error(
+                    "❌ Inbox が存在しません。"
+                    "ストレージ接続を確認してください。"
+                )
 
             except QuotaExceeded as e:
                 st.error(
                     f"❌ 容量オーバーです。"
-                    f" 現在={e.current} / 追加={e.incoming} / 上限={e.quota}"
+                    f" 現在={e.current} / "
+                    f"追加={e.incoming} / "
+                    f"上限={e.quota}"
                 )
 
             except IngestFailed as e:
-                st.error(f"❌ Inbox への保存に失敗しました: {e}")
-
-    with col_word_inbox:
-        if st.button(
-            "WordをInboxへ保存",
-            type="secondary",
-            key=f"{PAGE_NAME}__save_word_to_inbox",
-        ):
-            try:
-                docx_data = st.session_state.get(K_LAST_DOCX_BYTES)
-                docx_filename = st.session_state.get(K_LAST_DOCX_NAME)
-                origin_base = dict(st.session_state.get(K_LAST_REPORT_ORIGIN) or {})
-
-                if not docx_data or not docx_filename:
-                    st.error("❌ Wordが生成されていないため保存できません。")
-                    st.stop()
-
-                origin = dict(origin_base)
-                origin["action"] = "proofreading_report_word"
-
-                ingest_to_inbox(
-                    projects_root=PROJECTS_ROOT,
-                    req=IngestRequest(
-                        user_sub=sub,
-                        filename=docx_filename,
-                        data=docx_data,
-                        tags_json='["text_studio/proofreading_report/word"]',
-                        origin=origin,
-                    ),
-                )
-
-                st.success("WordをInboxに保存しました。")
-
-            except InboxNotAvailable:
-                st.error("❌ Inbox が存在しません。ストレージ接続を確認してください。")
-
-            except QuotaExceeded as e:
                 st.error(
-                    f"❌ 容量オーバーです。"
-                    f" 現在={e.current} / 追加={e.incoming} / 上限={e.quota}"
+                    f"❌ Inbox への保存に失敗しました: {e}"
                 )
-
-            except IngestFailed as e:
-                st.error(f"❌ Inbox への保存に失敗しました: {e}")
         
 # ------------------------------------------------------------
 # 何も入力が無いときだけ案内を出す
